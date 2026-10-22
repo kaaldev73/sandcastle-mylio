@@ -1,4 +1,9 @@
-import { randomBytes, scryptSync, timingSafeEqual, createHash } from "node:crypto";
+import {
+  createHash,
+  randomBytes,
+  scryptSync,
+  timingSafeEqual,
+} from "node:crypto";
 
 /**
  * Password hashing and token helpers. Passwords are hashed with scrypt and a

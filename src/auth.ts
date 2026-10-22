@@ -70,18 +70,17 @@ export function createAuth(db: DatabaseSync, config: Config) {
   const currentMember = (cookies: Map<string, string>): MemberRow | null => {
     const token = cookies.get(COOKIE_NAME);
     if (!token) return null;
+    const tokenHash = hashToken(token);
     const row = db
       .prepare(
         `SELECT m.id, m.email, m.role, m.password_hash, s.expires_at AS expires_at
          FROM session s JOIN member m ON m.id = s.member_id
          WHERE s.token_hash = ?`,
       )
-      .get(hashToken(token)) as (MemberRow & { expires_at: number }) | undefined;
+      .get(tokenHash) as (MemberRow & { expires_at: number }) | undefined;
     if (!row) return null;
     if (row.expires_at <= now()) {
-      db.prepare("DELETE FROM session WHERE token_hash = ?").run(
-        hashToken(token),
-      );
+      db.prepare("DELETE FROM session WHERE token_hash = ?").run(tokenHash);
       return null;
     }
     return row;
@@ -211,7 +210,8 @@ export function createAuth(db: DatabaseSync, config: Config) {
       }
 
       const member = findMemberByEmail(email);
-      const ok = member !== undefined && verifyPassword(password, member.password_hash);
+      const ok =
+        member !== undefined && verifyPassword(password, member.password_hash);
 
       db.prepare(
         "INSERT INTO login_attempt (email, succeeded, created_at) VALUES (?, ?, ?)",
