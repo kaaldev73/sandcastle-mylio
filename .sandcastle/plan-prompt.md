@@ -4,11 +4,11 @@ Here are the open issues in the repo:
 
 <issues-json>
 
-!`gh issue list --state open --label Sandcastle --limit 100 --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`
+!`gh api 'repos/kaaldev73/sandcastle-mylio/issues?state=open&labels=ready-for-agent&per_page=100' --jq '[.[] | select((.pull_request|not) and (.sub_issues_summary.total == 0) and (.issue_dependencies_summary.blocked_by == 0)) | {number, title, body, labels: [.labels[].name]}]'`
 
 </issues-json>
 
-The list above has already been filtered to issues ready for work.
+The list above has already been filtered to leaf tickets labelled `ready-for-agent` that have no open blockers (GitHub's native blocking links), so every issue listed is unblocked on dependencies. Still check the issues against each other and drop any pair likely to cause merge conflicts, keeping the one that should land first.
 
 # TASK
 
