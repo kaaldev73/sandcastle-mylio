@@ -1,9 +1,9 @@
 import { createApp } from "./app.ts";
-import { ConfigError, loadConfig } from "./config.ts";
+import { ConfigError, loadConfig, type Config } from "./config.ts";
 
 /** Container entry point: load config from env, boot the app, start serving. */
 async function main(): Promise<void> {
-  let config;
+  let config: Config;
   try {
     config = loadConfig();
   } catch (err) {
