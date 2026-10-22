@@ -11,6 +11,7 @@ import { createAuth, type Ctx } from "./auth.ts";
 import type { Config } from "./config.ts";
 import { openDatabase } from "./db.ts";
 import { HttpError, parseCookies, readJsonBody, sendJson } from "./http.ts";
+import { createLibraries } from "./libraries.ts";
 
 export interface App {
   /** Start listening on config.PORT. Returns the base URL actually bound. */
@@ -30,6 +31,7 @@ type Handler = (ctx: Ctx) => void | Promise<void>;
 export async function createApp(config: Config): Promise<App> {
   const db: DatabaseSync = openDatabase(config);
   const auth = createAuth(db, config);
+  const libraries = createLibraries(db, auth);
 
   // method + path → handler. Body is parsed for every route uniformly; GET
   // handlers simply ignore it.
@@ -42,7 +44,23 @@ export async function createApp(config: Config): Promise<App> {
     ["GET /api/me", auth.me],
     ["POST /api/password-reset/request", auth.requestPasswordReset],
     ["POST /api/password-reset/confirm", auth.confirmPasswordReset],
+    ["GET /api/libraries", libraries.list],
   ]);
+
+  // Dynamic routes with a path parameter, tried when no static route matches.
+  const dynamicRoutes: {
+    method: string;
+    pattern: RegExp;
+    handler: Handler;
+    keys: readonly string[];
+  }[] = [
+    {
+      method: "GET",
+      pattern: /^\/api\/libraries\/(\d+)$/,
+      handler: libraries.get,
+      keys: ["id"],
+    },
+  ];
 
   const server: Server = createServer((req, res) => {
     void handle(req, res).catch((err) => {
@@ -66,7 +84,20 @@ export async function createApp(config: Config): Promise<App> {
       return;
     }
 
-    const handler = routes.get(`${method} ${path}`);
+    let handler = routes.get(`${method} ${path}`);
+    let params: Record<string, string> = {};
+    if (!handler) {
+      for (const route of dynamicRoutes) {
+        if (route.method !== method) continue;
+        const match = route.pattern.exec(path);
+        if (!match) continue;
+        handler = route.handler;
+        params = Object.fromEntries(
+          route.keys.map((key, i) => [key, match[i + 1]]),
+        );
+        break;
+      }
+    }
     if (!handler) {
       sendJson(res, 404, { error: "not_found" });
       return;
@@ -74,7 +105,7 @@ export async function createApp(config: Config): Promise<App> {
 
     const cookies = parseCookies(req.headers.cookie);
     const body = method === "GET" ? {} : await readJsonBody(req);
-    await handler({ req, res, cookies, body });
+    await handler({ req, res, cookies, body, params });
   }
 
   return {

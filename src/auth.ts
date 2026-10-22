@@ -9,6 +9,7 @@ import {
   verifyPassword,
 } from "./crypto.ts";
 import { HttpError, requireString, sendJson } from "./http.ts";
+import { createPrivateLibrary } from "./libraries.ts";
 
 const COOKIE_NAME = "familio_session";
 const MIN_PASSWORD_LENGTH = 8;
@@ -35,6 +36,8 @@ export interface Ctx {
   res: ServerResponse;
   cookies: Map<string, string>;
   body: Record<string, unknown>;
+  /** Path parameters captured from a dynamic route (e.g. `:id`); {} otherwise. */
+  params: Record<string, string>;
 }
 
 /**
@@ -112,8 +115,10 @@ export function createAuth(db: DatabaseSync, config: Config) {
           "INSERT INTO member (email, password_hash, role, created_at) VALUES (?, ?, 'admin', ?)",
         )
         .run(email, hashPassword(password), now());
+      const memberId = Number(info.lastInsertRowid);
+      createPrivateLibrary(db, memberId);
       const member = findMemberByEmail(email)!;
-      startSession(res, Number(info.lastInsertRowid));
+      startSession(res, memberId);
       sendJson(res, 201, publicMember(member));
     },
 
@@ -182,13 +187,15 @@ export function createAuth(db: DatabaseSync, config: Config) {
           "INSERT INTO member (email, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
         )
         .run(invite.email, hashPassword(password), invite.role, now());
+      const memberId = Number(info.lastInsertRowid);
       db.prepare("UPDATE invitation SET accepted_at = ? WHERE id = ?").run(
         now(),
         invite.id,
       );
+      createPrivateLibrary(db, memberId);
 
       const member = findMemberByEmail(invite.email)!;
-      startSession(res, Number(info.lastInsertRowid));
+      startSession(res, memberId);
       sendJson(res, 201, publicMember(member));
     },
 
