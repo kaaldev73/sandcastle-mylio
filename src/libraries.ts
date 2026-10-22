@@ -3,7 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { Auth, Ctx } from "./auth.ts";
 import { HttpError, sendJson } from "./http.ts";
 
-interface LibraryRow {
+export interface LibraryRow {
   id: number;
   kind: "private" | "family";
   owner_id: number | null;
@@ -12,6 +12,26 @@ interface LibraryRow {
 /** Public shape of a Library returned to clients; owner_id is never exposed. */
 function publicLibrary(l: LibraryRow): { id: number; kind: string } {
   return { id: l.id, kind: l.kind };
+}
+
+/**
+ * Return a Library if the given Member may access it, else null. The Family
+ * Library is visible to every Member; a private Library only to its owner
+ * (Admins get no special read access, ADR 0003). An unknown id and another
+ * Member's private Library are indistinguishable — both null — so callers
+ * never reveal which private Libraries exist. This is the one server-side
+ * access rule reused by every Library- and Asset-scoped request.
+ */
+export function libraryAccessibleBy(
+  db: DatabaseSync,
+  libraryId: number,
+  memberId: number,
+): LibraryRow | null {
+  const lib = db
+    .prepare("SELECT id, kind, owner_id FROM library WHERE id = ?")
+    .get(libraryId) as LibraryRow | undefined;
+  if (!lib || (lib.kind === "private" && lib.owner_id !== memberId)) return null;
+  return lib;
 }
 
 /**
@@ -56,16 +76,8 @@ export function createLibraries(db: DatabaseSync, auth: Auth) {
       const member = auth.currentMember(cookies);
       if (!member) throw new HttpError(401, "unauthenticated");
 
-      const lib = db
-        .prepare("SELECT id, kind, owner_id FROM library WHERE id = ?")
-        .get(Number(params.id)) as LibraryRow | undefined;
-
-      // A private Library is visible only to its owner. An unknown id and
-      // another Member's private Library both answer 404 so the response never
-      // reveals which private Libraries exist.
-      if (!lib || (lib.kind === "private" && lib.owner_id !== member.id)) {
-        throw new HttpError(404, "library_not_found");
-      }
+      const lib = libraryAccessibleBy(db, Number(params.id), member.id);
+      if (!lib) throw new HttpError(404, "library_not_found");
       sendJson(res, 200, publicLibrary(lib));
     },
   };

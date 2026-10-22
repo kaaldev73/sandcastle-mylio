@@ -102,6 +102,37 @@ export const migrations: readonly Migration[] = [
       `);
     },
   },
+  {
+    id: "0004-assets",
+    up(db) {
+      // An Asset is a single photo stored in exactly one Library (ADR 0003).
+      // The original file is kept untouched on disk (content-addressed by its
+      // SHA-256 hash); the thumbnail is derived data stored separately (here,
+      // a small BLOB) and can always be regenerated from the original. The
+      // capture date is epoch milliseconds so Timeline ordering is plain
+      // arithmetic; capture_source records whether it came from the file's
+      // metadata ('exif') or the file date fallback ('file').
+      db.exec(`
+        CREATE TABLE asset (
+          id              INTEGER PRIMARY KEY,
+          library_id      INTEGER NOT NULL REFERENCES library(id) ON DELETE CASCADE,
+          uploader_id     INTEGER NOT NULL REFERENCES member(id),
+          filename        TEXT NOT NULL,
+          mime_type       TEXT NOT NULL,
+          byte_size       INTEGER NOT NULL,
+          content_hash    TEXT NOT NULL,
+          capture_date    INTEGER NOT NULL,
+          capture_source  TEXT NOT NULL CHECK (capture_source IN ('exif', 'file')),
+          storage_path    TEXT NOT NULL,
+          thumbnail       BLOB NOT NULL,
+          thumbnail_mime  TEXT NOT NULL,
+          created_at      INTEGER NOT NULL
+        );
+        CREATE INDEX idx_asset_library ON asset (library_id, capture_date);
+        CREATE INDEX idx_asset_hash ON asset (library_id, content_hash);
+      `);
+    },
+  },
 ];
 
 /**

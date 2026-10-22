@@ -24,6 +24,7 @@ message naming every problem (see `src/config.ts`, the single source of truth).
 | `PASSWORD_RESET_TTL_SECONDS` | no | `3600` (1 hour) | How long a password-reset token stays valid. |
 | `LOGIN_MAX_FAILURES` | no | `5` | Failed logins allowed per email within the window before blocking. |
 | `LOGIN_WINDOW_SECONDS` | no | `900` (15 min) | Sliding window for counting login failures. |
+| `UPLOAD_MAX_BYTES` | no | `52428800` (50 MB) | Largest single Upload accepted. |
 
 The Dockerfile already sets `DATABASE_PATH=/data/familio.db`,
 `ORIGINALS_DIR=/data/originals` and `PORT=3000`, so in Coolify you normally only

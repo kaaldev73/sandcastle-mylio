@@ -33,6 +33,9 @@ const configSchema = z.object({
   LOGIN_MAX_FAILURES: z.coerce.number().int().min(1).default(5),
   /** Sliding window for login failure counting, in seconds. Default 15 min. */
   LOGIN_WINDOW_SECONDS: z.coerce.number().int().min(1).default(900),
+  /** Largest Upload accepted, in bytes. Default 50 MB — enough for a JPEG or
+   * PNG from any phone or camera. */
+  UPLOAD_MAX_BYTES: z.coerce.number().int().min(1).default(52_428_800),
 });
 
 export type Config = Readonly<z.infer<typeof configSchema>>;

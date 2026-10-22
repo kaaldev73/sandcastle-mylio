@@ -53,6 +53,25 @@ export async function readJsonBody(
   return parsed as Record<string, unknown>;
 }
 
+/**
+ * Read a raw request body into a single Buffer, used for binary Uploads (the
+ * JSON parser would corrupt image bytes). Throws HttpError(413) if the body
+ * exceeds the limit.
+ */
+export async function readRawBody(
+  req: IncomingMessage,
+  maxBytes: number,
+): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > maxBytes) throw new HttpError(413, "payload_too_large");
+    chunks.push(chunk as Buffer);
+  }
+  return Buffer.concat(chunks);
+}
+
 /** Parse a Cookie header into a name→value map. */
 export function parseCookies(header: string | undefined): Map<string, string> {
   const out = new Map<string, string>();

@@ -7,6 +7,7 @@ import {
 import type { AddressInfo } from "node:net";
 import type { DatabaseSync } from "node:sqlite";
 
+import { createAssets } from "./assets.ts";
 import { createAuth, type Ctx } from "./auth.ts";
 import type { Config } from "./config.ts";
 import { openDatabase } from "./db.ts";
@@ -32,6 +33,7 @@ export async function createApp(config: Config): Promise<App> {
   const db: DatabaseSync = openDatabase(config);
   const auth = createAuth(db, config);
   const libraries = createLibraries(db, auth);
+  const assets = createAssets(db, auth, config);
 
   // method + path → handler. Body is parsed for every route uniformly; GET
   // handlers simply ignore it.
@@ -48,16 +50,44 @@ export async function createApp(config: Config): Promise<App> {
   ]);
 
   // Dynamic routes with a path parameter, tried when no static route matches.
+  // `raw` routes receive the unparsed request body (binary Uploads); every
+  // other route gets the JSON body parsed uniformly.
   const dynamicRoutes: {
     method: string;
     pattern: RegExp;
     handler: Handler;
     keys: readonly string[];
+    raw?: boolean;
   }[] = [
     {
       method: "GET",
       pattern: /^\/api\/libraries\/(\d+)$/,
       handler: libraries.get,
+      keys: ["id"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/libraries\/(\d+)\/assets$/,
+      handler: assets.upload,
+      keys: ["id"],
+      raw: true,
+    },
+    {
+      method: "GET",
+      pattern: /^\/api\/libraries\/(\d+)\/assets$/,
+      handler: assets.list,
+      keys: ["id"],
+    },
+    {
+      method: "GET",
+      pattern: /^\/api\/assets\/(\d+)\/thumbnail$/,
+      handler: assets.thumbnail,
+      keys: ["id"],
+    },
+    {
+      method: "GET",
+      pattern: /^\/api\/assets\/(\d+)\/original$/,
+      handler: assets.original,
       keys: ["id"],
     },
   ];
@@ -86,12 +116,14 @@ export async function createApp(config: Config): Promise<App> {
 
     let handler = routes.get(`${method} ${path}`);
     let params: Record<string, string> = {};
+    let raw = false;
     if (!handler) {
       for (const route of dynamicRoutes) {
         if (route.method !== method) continue;
         const match = route.pattern.exec(path);
         if (!match) continue;
         handler = route.handler;
+        raw = route.raw ?? false;
         params = Object.fromEntries(
           route.keys.map((key, i) => [key, match[i + 1]]),
         );
@@ -104,7 +136,9 @@ export async function createApp(config: Config): Promise<App> {
     }
 
     const cookies = parseCookies(req.headers.cookie);
-    const body = method === "GET" ? {} : await readJsonBody(req);
+    // GET carries no body; raw routes read it themselves (binary Upload); the
+    // rest get a parsed JSON object.
+    const body = method === "GET" || raw ? {} : await readJsonBody(req);
     await handler({ req, res, cookies, body, params });
   }
 
