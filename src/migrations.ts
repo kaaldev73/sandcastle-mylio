@@ -80,6 +80,28 @@ export const migrations: readonly Migration[] = [
       `);
     },
   },
+  {
+    id: "0003-libraries",
+    up(db) {
+      // Give the placeholder `library` table an owner and the access rule it
+      // carries (ADR 0003). A private Library is owned by exactly one Member
+      // (owner_id set, unique); the single Family Library has no owner
+      // (owner_id NULL) and is visible to all. The Family Library exists from
+      // the very first boot, so seed it here. Cascade a Library away with its
+      // owner so a removed Member leaves no orphan private Library.
+      db.exec(`
+        ALTER TABLE library
+          ADD COLUMN owner_id INTEGER REFERENCES member(id) ON DELETE CASCADE;
+
+        CREATE UNIQUE INDEX idx_library_owner
+          ON library (owner_id) WHERE owner_id IS NOT NULL;
+        CREATE UNIQUE INDEX idx_library_family
+          ON library (kind) WHERE kind = 'family';
+
+        INSERT INTO library (kind) VALUES ('family');
+      `);
+    },
+  },
 ];
 
 /**
