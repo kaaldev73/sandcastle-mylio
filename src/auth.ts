@@ -46,6 +46,12 @@ export interface Ctx {
 export function createAuth(db: DatabaseSync, config: Config) {
   const now = () => Date.now();
 
+  // Shared session-cookie attributes. Secure is added in production so a
+  // browser only sends the cookie over HTTPS (served behind Coolify's TLS
+  // proxy, ADR 0002); SECURE_COOKIES=false drops it for plain-HTTP local runs.
+  const cookieFlags =
+    `HttpOnly; Path=/; SameSite=Lax` + (config.SECURE_COOKIES ? "; Secure" : "");
+
   const findMemberByEmail = (email: string): MemberRow | undefined =>
     db
       .prepare(
@@ -62,7 +68,7 @@ export function createAuth(db: DatabaseSync, config: Config) {
     ).run(hashToken(token), memberId, expiresAt, now());
     res.setHeader(
       "set-cookie",
-      `${COOKIE_NAME}=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${config.SESSION_TTL_SECONDS}`,
+      `${COOKIE_NAME}=${token}; ${cookieFlags}; Max-Age=${config.SESSION_TTL_SECONDS}`,
     );
   };
 
@@ -237,7 +243,7 @@ export function createAuth(db: DatabaseSync, config: Config) {
       }
       res.setHeader(
         "set-cookie",
-        `${COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`,
+        `${COOKIE_NAME}=; ${cookieFlags}; Max-Age=0`,
       );
       sendJson(res, 200, { status: "ok" });
     },

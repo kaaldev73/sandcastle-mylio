@@ -19,6 +19,10 @@ const configSchema = z.object({
   SESSION_SECRET: z
     .string()
     .min(16, "SESSION_SECRET must be at least 16 characters"),
+  /** Mark the session cookie Secure so browsers only send it over HTTPS.
+   * Defaults to true: production is served behind Coolify's HTTPS proxy
+   * (ADR 0002). Set false only for a plain-HTTP local run. */
+  SECURE_COOKIES: z.stringbool().default(true),
   /** How long a login session stays valid, in seconds. Default 7 days. */
   SESSION_TTL_SECONDS: z.coerce.number().int().min(0).default(604800),
   /** How long an unaccepted invitation stays valid, in seconds. Default 7 days. */
