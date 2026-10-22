@@ -25,6 +25,10 @@ interface AssetRow {
   thumbnail_mime: string;
 }
 
+/** Columns selected wherever an AssetRow is read, kept in sync in one place. */
+const ASSET_COLUMNS = `id, library_id, filename, mime_type, byte_size, content_hash,
+         capture_date, capture_source, storage_path, thumbnail, thumbnail_mime`;
+
 /** Public, grid-ready shape of an Asset; storage details are never exposed. */
 function publicAsset(a: AssetRow): Record<string, unknown> {
   return {
@@ -40,10 +44,15 @@ function publicAsset(a: AssetRow): Record<string, unknown> {
   };
 }
 
+/** Read a single request header value, collapsing the array form Node may give. */
+function header(ctx: Ctx, name: string): string | undefined {
+  const raw = ctx.req.headers[name];
+  return Array.isArray(raw) ? raw[0] : raw;
+}
+
 /** Read an optional epoch-ms "file date" the client sends for its upload. */
 function fileDateHeader(ctx: Ctx): number | null {
-  const raw = ctx.req.headers["x-file-modified-ms"];
-  const value = Array.isArray(raw) ? raw[0] : raw;
+  const value = header(ctx, "x-file-modified-ms");
   if (!value) return null;
   const ms = Number(value);
   return Number.isFinite(ms) && ms > 0 ? ms : null;
@@ -51,9 +60,7 @@ function fileDateHeader(ctx: Ctx): number | null {
 
 /** Read the client-supplied original filename, falling back to a safe default. */
 function filenameHeader(ctx: Ctx, ext: string): string {
-  const raw = ctx.req.headers["x-filename"];
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  const name = typeof value === "string" ? value.trim() : "";
+  const name = header(ctx, "x-filename")?.trim() ?? "";
   return name !== "" ? name : `upload${ext}`;
 }
 
@@ -76,11 +83,7 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
   /** Fetch an Asset the Member may see, or throw 404 (never revealing why). */
   const accessibleAsset = (assetId: number, memberId: number): AssetRow => {
     const asset = db
-      .prepare(
-        `SELECT id, library_id, filename, mime_type, byte_size, content_hash,
-                capture_date, capture_source, storage_path, thumbnail, thumbnail_mime
-         FROM asset WHERE id = ?`,
-      )
+      .prepare(`SELECT ${ASSET_COLUMNS} FROM asset WHERE id = ?`)
       .get(assetId) as AssetRow | undefined;
     if (!asset || !libraryAccessibleBy(db, asset.library_id, memberId)) {
       throw new HttpError(404, "asset_not_found");
@@ -165,9 +168,7 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
       }
       const assets = db
         .prepare(
-          `SELECT id, library_id, filename, mime_type, byte_size, content_hash,
-                  capture_date, capture_source, storage_path, thumbnail, thumbnail_mime
-           FROM asset WHERE library_id = ?
+          `SELECT ${ASSET_COLUMNS} FROM asset WHERE library_id = ?
            ORDER BY capture_date DESC, id DESC`,
         )
         .all(libraryId) as unknown as AssetRow[];
