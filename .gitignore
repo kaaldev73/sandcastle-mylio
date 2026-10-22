@@ -1,1 +1,7 @@
 node_modules/
+
+# Local runtime data: SQLite database (+ WAL/SHM) and originals.
+/data/
+*.db
+*.db-wal
+*.db-shm
