@@ -60,3 +60,16 @@ export async function startTestApp(
     },
   };
 }
+
+/**
+ * Extract the `familio_session` cookie from a response as a `name=value` pair
+ * ready to send back in a Cookie header. Node's fetch keeps no cookie jar, so
+ * tests carry the session themselves. Returns undefined if none was set.
+ */
+export function sessionCookie(res: Response): string | undefined {
+  for (const raw of res.headers.getSetCookie()) {
+    const pair = raw.split(";", 1)[0];
+    if (pair.startsWith("familio_session=")) return pair;
+  }
+  return undefined;
+}

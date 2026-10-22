@@ -19,6 +19,16 @@ const configSchema = z.object({
   SESSION_SECRET: z
     .string()
     .min(16, "SESSION_SECRET must be at least 16 characters"),
+  /** How long a login session stays valid, in seconds. Default 7 days. */
+  SESSION_TTL_SECONDS: z.coerce.number().int().min(0).default(604800),
+  /** How long an unaccepted invitation stays valid, in seconds. Default 7 days. */
+  INVITE_TTL_SECONDS: z.coerce.number().int().min(0).default(604800),
+  /** How long a password-reset token stays valid, in seconds. Default 1 hour. */
+  PASSWORD_RESET_TTL_SECONDS: z.coerce.number().int().min(0).default(3600),
+  /** Failed logins allowed per email within the window before blocking. */
+  LOGIN_MAX_FAILURES: z.coerce.number().int().min(1).default(5),
+  /** Sliding window for login failure counting, in seconds. Default 15 min. */
+  LOGIN_WINDOW_SECONDS: z.coerce.number().int().min(1).default(900),
 });
 
 export type Config = Readonly<z.infer<typeof configSchema>>;

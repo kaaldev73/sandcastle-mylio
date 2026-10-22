@@ -26,6 +26,60 @@ export const migrations: readonly Migration[] = [
       `);
     },
   },
+  {
+    id: "0002-accounts",
+    up(db) {
+      // Accounts, invitations, sessions, password resets and a log of login
+      // attempts (for rate limiting). All timestamps are epoch milliseconds
+      // (INTEGER) so expiry and window comparisons are plain arithmetic.
+      // Email is unique case-insensitively; it is also normalised in code.
+      db.exec(`
+        CREATE TABLE member (
+          id             INTEGER PRIMARY KEY,
+          email          TEXT NOT NULL UNIQUE COLLATE NOCASE,
+          password_hash  TEXT NOT NULL,
+          role           TEXT NOT NULL CHECK (role IN ('admin', 'member')),
+          created_at     INTEGER NOT NULL
+        );
+
+        CREATE TABLE invitation (
+          id           INTEGER PRIMARY KEY,
+          email        TEXT NOT NULL COLLATE NOCASE,
+          token_hash   TEXT NOT NULL UNIQUE,
+          role         TEXT NOT NULL CHECK (role IN ('admin', 'member')),
+          invited_by   INTEGER NOT NULL REFERENCES member(id),
+          expires_at   INTEGER NOT NULL,
+          accepted_at  INTEGER,
+          created_at   INTEGER NOT NULL
+        );
+
+        CREATE TABLE session (
+          id          INTEGER PRIMARY KEY,
+          token_hash  TEXT NOT NULL UNIQUE,
+          member_id   INTEGER NOT NULL REFERENCES member(id) ON DELETE CASCADE,
+          expires_at  INTEGER NOT NULL,
+          created_at  INTEGER NOT NULL
+        );
+
+        CREATE TABLE password_reset (
+          id          INTEGER PRIMARY KEY,
+          token_hash  TEXT NOT NULL UNIQUE,
+          member_id   INTEGER NOT NULL REFERENCES member(id) ON DELETE CASCADE,
+          expires_at  INTEGER NOT NULL,
+          used_at     INTEGER,
+          created_at  INTEGER NOT NULL
+        );
+
+        CREATE TABLE login_attempt (
+          id          INTEGER PRIMARY KEY,
+          email       TEXT NOT NULL COLLATE NOCASE,
+          succeeded   INTEGER NOT NULL,
+          created_at  INTEGER NOT NULL
+        );
+        CREATE INDEX idx_login_attempt_email ON login_attempt (email, created_at);
+      `);
+    },
+  },
 ];
 
 /**
