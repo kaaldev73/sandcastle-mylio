@@ -49,8 +49,9 @@ export function createAuth(db: DatabaseSync, config: Config) {
   // Shared session-cookie attributes. Secure is added in production so a
   // browser only sends the cookie over HTTPS (served behind Coolify's TLS
   // proxy, ADR 0002); SECURE_COOKIES=false drops it for plain-HTTP local runs.
-  const cookieFlags =
-    `HttpOnly; Path=/; SameSite=Lax` + (config.SECURE_COOKIES ? "; Secure" : "");
+  const cookieFlags = `HttpOnly; Path=/; SameSite=Lax${
+    config.SECURE_COOKIES ? "; Secure" : ""
+  }`;
 
   const findMemberByEmail = (email: string): MemberRow | undefined =>
     db
