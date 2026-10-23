@@ -327,6 +327,39 @@ test("an Asset can only join an Album in its own Library", async () => {
   }
 });
 
+test("the Family Library's Albums are shared by every Member", async () => {
+  const app = await startTestApp();
+  try {
+    const adminCookie = await setupAdmin(app);
+    const aliceCookie = await joinMember(app, adminCookie, "alice@example.com");
+    const family = await familyLibrary(app, adminCookie);
+    const album = await createAlbum(app, adminCookie, family.id, "Family trip");
+    const asset = await upload(
+      app,
+      aliceCookie,
+      family.id,
+      await makeJpeg(),
+      "trip.jpg",
+    );
+
+    // Alice sees the Admin's Album and can add her own Asset to it.
+    assert.deepEqual(
+      (await listAlbums(app, aliceCookie, family.id)).map((a) => a.id),
+      [album.id],
+    );
+    const added = await addAsset(app, aliceCookie, album.id, asset.id);
+    assert.deepEqual(added.assets.map((a) => a.id), [asset.id]);
+
+    // The Admin sees the same Album and its newly added Asset.
+    assert.deepEqual(
+      (await openAlbum(app, adminCookie, album.id)).assets.map((a) => a.id),
+      [asset.id],
+    );
+  } finally {
+    await app.stop();
+  }
+});
+
 test("Albums are private to Members who can access their Library", async () => {
   const app = await startTestApp();
   try {

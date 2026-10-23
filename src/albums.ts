@@ -11,7 +11,7 @@ interface AlbumRow {
   name: string;
 }
 
-/** Summary shape of an Album for listings; the storage library id is exposed. */
+/** Summary shape of an Album for listings; its Library id is safe to expose. */
 function publicAlbum(a: AlbumRow, assetCount: number): Record<string, unknown> {
   return {
     id: a.id,
