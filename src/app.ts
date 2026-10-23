@@ -9,6 +9,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { createAssets } from "./assets.ts";
 import { createAuth, type Ctx } from "./auth.ts";
+import { createBackups } from "./backup.ts";
 import type { Config } from "./config.ts";
 import { openDatabase } from "./db.ts";
 import { HttpError, parseCookies, readJsonBody, sendJson } from "./http.ts";
@@ -34,6 +35,7 @@ export async function createApp(config: Config): Promise<App> {
   const auth = createAuth(db, config);
   const libraries = createLibraries(db, auth);
   const assets = createAssets(db, auth, config);
+  const backups = createBackups(db, auth, config);
 
   // method + path → handler. Body is parsed for every route uniformly; GET
   // handlers simply ignore it.
@@ -47,6 +49,9 @@ export async function createApp(config: Config): Promise<App> {
     ["POST /api/password-reset/request", auth.requestPasswordReset],
     ["POST /api/password-reset/confirm", auth.confirmPasswordReset],
     ["GET /api/libraries", libraries.list],
+    ["GET /api/admin/backups", backups.status],
+    ["POST /api/admin/backups", backups.runNow],
+    ["GET /api/admin/disk", backups.disk],
   ]);
 
   // Dynamic routes with a path parameter, tried when no static route matches.
@@ -142,6 +147,8 @@ export async function createApp(config: Config): Promise<App> {
     await handler({ req, res, cookies, body, params });
   }
 
+  backups.start();
+
   return {
     listen() {
       return new Promise<string>((resolve, reject) => {
@@ -157,6 +164,7 @@ export async function createApp(config: Config): Promise<App> {
     },
     close() {
       return new Promise<void>((resolve, reject) => {
+        backups.stop();
         server.close((err) => {
           db.close();
           if (err) reject(err);

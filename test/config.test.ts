@@ -39,3 +39,31 @@ test("valid environment produces a frozen config with defaults applied", () => {
   assert.equal(config.ORIGINALS_DIR, valid.ORIGINALS_DIR);
   assert.ok(Object.isFrozen(config));
 });
+
+test("backup target variables must be supplied together", () => {
+  assert.throws(
+    () =>
+      loadConfig({
+        ...valid,
+        BACKUP_S3_ENDPOINT: "http://127.0.0.1:9000",
+      }),
+    (err: unknown) =>
+      err instanceof ConfigError &&
+      /BACKUP_S3_BUCKET/.test(err.message) &&
+      /BACKUP_S3_ACCESS_KEY_ID/.test(err.message) &&
+      /BACKUP_S3_SECRET_ACCESS_KEY/.test(err.message),
+  );
+});
+
+test("a complete backup target is accepted with region and prefix defaults", () => {
+  const config = loadConfig({
+    ...valid,
+    BACKUP_S3_ENDPOINT: "http://127.0.0.1:9000",
+    BACKUP_S3_BUCKET: "photos",
+    BACKUP_S3_ACCESS_KEY_ID: "key",
+    BACKUP_S3_SECRET_ACCESS_KEY: "secret",
+  });
+  assert.equal(config.BACKUP_S3_REGION, "us-east-1");
+  assert.equal(config.BACKUP_S3_PREFIX, "familio");
+  assert.equal(config.BACKUP_INTERVAL_SECONDS, 86400);
+});
