@@ -44,8 +44,8 @@ const planSchema = z.object({
 // Raise this if your backlog is large; lower it for a quick smoke-test run.
 const MAX_ITERATIONS = 10;
 
-// Override on the host: OPENCODE_MODEL=provider/model npm run sandcastle
-const model = process.env.OPENCODE_MODEL?.trim() || "opencode/big-pickle";
+// All agents use this model; there is deliberately no environment override.
+const model = "opencode/big-pickle";
 
 // Hooks run inside the sandbox before the agent starts each iteration.
 // npm install ensures the sandbox always has fresh dependencies.
