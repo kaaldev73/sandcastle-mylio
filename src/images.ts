@@ -15,6 +15,21 @@ const THUMBNAIL_SIZE = 256;
 const JPEG_SOI = Buffer.from([0xff, 0xd8, 0xff]);
 const JPEG_EOI = Buffer.from([0xff, 0xd9]);
 
+/** ISO BMFF brands that identify an HEVC-coded HEIC image. */
+const HEIC_BRANDS = new Set([
+  "heic",
+  "heix",
+  "hevc",
+  "hevx",
+  "heim",
+  "heis",
+  "hevm",
+  "hevs",
+]);
+
+/** ISO BMFF brands for HEIF containers using any codec. */
+const HEIF_BRANDS = new Set(["heif", "mif1", "msf1"]);
+
 export interface ImageType {
   readonly mime: string;
   /** File extension including the dot, used for the stored original. */
@@ -41,29 +56,20 @@ function detectIsoBmff(buf: Buffer): ImageType | null {
   if (!hasText(buf, "ftyp", 4) || buf.length < 12) return null;
 
   const boxSize = buf.readUInt32BE(0);
-  const end = Math.min(boxSize >= 16 ? boxSize : buf.length, buf.length);
-  const brands: string[] = [buf.toString("latin1", 8, 12).trim().toLowerCase()];
+  const end = boxSize >= 16 ? Math.min(boxSize, buf.length) : buf.length;
+  const brands = [buf.toString("latin1", 8, 12)];
   for (let off = 16; off + 4 <= end; off += 4) {
-    brands.push(buf.toString("latin1", off, off + 4).trim().toLowerCase());
+    brands.push(buf.toString("latin1", off, off + 4));
   }
+  const normalised = brands.map((brand) => brand.trim().toLowerCase());
 
-  if (brands.includes("crx")) {
+  if (normalised.includes("crx")) {
     return { mime: "image/x-canon-cr3", ext: ".cr3" };
   }
-  const heicBrands = [
-    "heic",
-    "heix",
-    "hevc",
-    "hevx",
-    "heim",
-    "heis",
-    "hevm",
-    "hevs",
-  ];
-  if (brands.some((brand) => heicBrands.includes(brand))) {
+  if (normalised.some((brand) => HEIC_BRANDS.has(brand))) {
     return { mime: "image/heic", ext: ".heic" };
   }
-  if (brands.some((brand) => ["heif", "mif1", "msf1"].includes(brand))) {
+  if (normalised.some((brand) => HEIF_BRANDS.has(brand))) {
     return { mime: "image/heif", ext: ".heif" };
   }
   return null;

@@ -8,8 +8,8 @@ import sharp from "sharp";
  * Real, small sample images for Upload tests (PRD Testing Decisions: use real
  * sample images as fixtures). Most are generated with sharp so each is a
  * genuine, valid image with known properties and the suite carries no opaque
- * blobs. HEIC and camera RAW cannot be encoded by sharp's prebuilt libvips, so
- * those two are small real samples checked in under test/fixtures.
+ * blobs. HEIC/HEIF and camera RAW cannot be encoded by sharp's prebuilt
+ * libvips, so those are small real samples checked in under test/fixtures.
  */
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures");

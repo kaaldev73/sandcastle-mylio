@@ -68,16 +68,11 @@ function clientFilename(ctx: Ctx): string | null {
   return name !== "" ? name : null;
 }
 
-/** Read the client-supplied original filename, falling back to a safe default. */
-function filenameHeader(ctx: Ctx, ext: string): string {
-  return clientFilename(ctx) ?? `upload${ext}`;
-}
-
 /** Formats the Upload endpoint accepts, for a human-readable rejection. */
 const SUPPORTED_FORMATS =
   "JPEG, PNG, GIF, WebP, TIFF, HEIC/HEIF and common RAW formats";
 
-/** Name a file in an error message without leaking anything or being vague. */
+/** Describe the uploaded file in an error, or fall back to a neutral phrase. */
 function describeFile(name: string | null): string {
   return name === null ? "this file" : `"${name}"`;
 }
@@ -176,7 +171,7 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
         .run(
           libraryId,
           member.id,
-          filenameHeader(ctx, type.ext),
+          submittedName ?? `upload${type.ext}`,
           type.mime,
           bytes.length,
           contentHash,
