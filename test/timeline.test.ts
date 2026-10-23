@@ -412,6 +412,80 @@ test("Assets with no EXIF date remain findable in the Timeline", async () => {
   }
 });
 
+test("Timeline drill-down works through path segments and back", async () => {
+  const app = await startTestApp();
+  try {
+    const cookie = await setupAdmin(app);
+    const lib = await privateLibrary(app, cookie);
+
+    await uploadExif(app, cookie, lib.id, "2018:02:03 04:05:06");
+    await uploadExif(app, cookie, lib.id, "2020:06:15 10:30:00");
+    await uploadExif(app, cookie, lib.id, "2021:07:01 08:00:00");
+
+    const root = await timeline(app, cookie, lib.id, "");
+    assert.equal(root.status, 200);
+    assert.deepEqual(
+      ((await root.json()) as Timeline).periods.map((p) => p.key),
+      ["2020", "2010"],
+    );
+
+    // A trailing slash on the root still means the default (decade) level.
+    assert.equal((await timeline(app, cookie, lib.id, "")).status, 200);
+    const trailing = await app.fetch(
+      `/api/libraries/${lib.id}/timeline/`,
+      { headers: { cookie } },
+    );
+    assert.equal(trailing.status, 200);
+
+    // A full date for the decade selector is normalised to its decade.
+    const years = await timelineOk(app, cookie, lib.id, "level=year&decade=2020-01-01");
+    assert.deepEqual(
+      years.periods.map((p) => p.key),
+      ["2021", "2020"],
+    );
+
+    const pathYears = await app.fetch(
+      `/api/libraries/${lib.id}/timeline/year/2020s`,
+      { headers: { cookie } },
+    );
+    assert.equal(pathYears.status, 200);
+    assert.deepEqual(
+      ((await pathYears.json()) as Timeline).periods.map((p) => p.key),
+      ["2021", "2020"],
+    );
+
+    const pathMonths = await app.fetch(
+      `/api/libraries/${lib.id}/timeline/month/2020`,
+      { headers: { cookie } },
+    );
+    assert.deepEqual(
+      ((await pathMonths.json()) as Timeline).periods.map((p) => p.key),
+      ["2020-06"],
+    );
+
+    const pathDays = await app.fetch(
+      `/api/libraries/${lib.id}/timeline/day/2020-06`,
+      { headers: { cookie } },
+    );
+    assert.deepEqual(
+      ((await pathDays.json()) as Timeline).periods.map((p) => p.key),
+      ["2020-06-15"],
+    );
+
+    // Back out to the decade level without any parent selector.
+    const back = await app.fetch(
+      `/api/libraries/${lib.id}/timeline/decade`,
+      { headers: { cookie } },
+    );
+    assert.deepEqual(
+      ((await back.json()) as Timeline).periods.map((p) => p.key),
+      ["2020", "2010"],
+    );
+  } finally {
+    await app.stop();
+  }
+});
+
 test("Timeline and date correction respect Library access", async () => {
   const app = await startTestApp();
   try {

@@ -76,7 +76,7 @@ export async function createApp(config: Config): Promise<App> {
     },
     {
       method: "GET",
-      pattern: /^\/api\/libraries\/(\d+)\/timeline(?:\/(.+))?$/,
+      pattern: /^\/api\/libraries\/(\d+)\/timeline(?:\/(.*))?$/,
       handler: timeline.list,
       keys: ["id", "path"],
     },

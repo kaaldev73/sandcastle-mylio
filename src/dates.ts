@@ -34,7 +34,7 @@ function endOfUtcYear(year: number): number {
 
 /** Normalise a decade's start year, accepting "2020", "2020s" or "2020-01-01". */
 export function parseDecade(value: string): number | null {
-  const m = /^(\d{4})s?$/.exec(value.trim());
+  const m = /^(\d{4})(?:s|-\d{2}(?:-\d{2})?)?$/.exec(value.trim());
   if (!m) return null;
   const year = Number(m[1]);
   return Date.UTC(Math.floor(year / 10) * 10, 0, 1);
