@@ -19,6 +19,7 @@ interface MemberRow {
   email: string;
   role: "admin" | "member";
   password_hash: string;
+  removed_at: number | null;
 }
 
 /** Public shape of a member returned to clients. */
@@ -59,7 +60,7 @@ export function createAuth(db: DatabaseSync, config: Config) {
   const findMemberByEmail = (email: string): MemberRow | undefined =>
     db
       .prepare(
-        "SELECT id, email, role, password_hash FROM member WHERE email = ?",
+        "SELECT id, email, role, password_hash, removed_at FROM member WHERE email = ?",
       )
       .get(email) as MemberRow | undefined;
 
@@ -83,13 +84,14 @@ export function createAuth(db: DatabaseSync, config: Config) {
     const tokenHash = hashToken(token);
     const row = db
       .prepare(
-        `SELECT m.id, m.email, m.role, m.password_hash, s.expires_at AS expires_at
+        `SELECT m.id, m.email, m.role, m.password_hash, m.removed_at,
+                s.expires_at AS expires_at
          FROM session s JOIN member m ON m.id = s.member_id
          WHERE s.token_hash = ?`,
       )
       .get(tokenHash) as (MemberRow & { expires_at: number }) | undefined;
     if (!row) return null;
-    if (row.expires_at <= now()) {
+    if (row.expires_at <= now() || row.removed_at !== null) {
       db.prepare("DELETE FROM session WHERE token_hash = ?").run(tokenHash);
       return null;
     }
@@ -225,7 +227,9 @@ export function createAuth(db: DatabaseSync, config: Config) {
 
       const member = findMemberByEmail(email);
       const ok =
-        member !== undefined && verifyPassword(password, member.password_hash);
+        member !== undefined &&
+        member.removed_at === null &&
+        verifyPassword(password, member.password_hash);
 
       db.prepare(
         "INSERT INTO login_attempt (email, succeeded, created_at) VALUES (?, ?, ?)",
@@ -269,9 +273,9 @@ export function createAuth(db: DatabaseSync, config: Config) {
       const member = findMemberByEmail(email);
       // Always answer 200 so the endpoint does not reveal whether an email is
       // registered. A token is only issued (and, for this slice, returned)
-      // when the email belongs to a Member.
+      // when the email belongs to an active Member.
       const response: { status: string; token?: string } = { status: "ok" };
-      if (member) {
+      if (member && member.removed_at === null) {
         const token = generateToken();
         const expiresAt = now() + config.PASSWORD_RESET_TTL_SECONDS * 1000;
         db.prepare(

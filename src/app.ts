@@ -13,6 +13,7 @@ import type { Config } from "./config.ts";
 import { openDatabase } from "./db.ts";
 import { HttpError, parseCookies, readJsonBody, sendJson } from "./http.ts";
 import { createLibraries } from "./libraries.ts";
+import { createMembers } from "./members.ts";
 
 export interface App {
   /** Start listening on config.PORT. Returns the base URL actually bound. */
@@ -34,6 +35,7 @@ export async function createApp(config: Config): Promise<App> {
   const auth = createAuth(db, config);
   const libraries = createLibraries(db, auth);
   const assets = createAssets(db, auth, config);
+  const members = createMembers(db, auth);
 
   // method + path → handler. Body is parsed for every route uniformly; GET
   // handlers simply ignore it.
@@ -47,6 +49,7 @@ export async function createApp(config: Config): Promise<App> {
     ["POST /api/password-reset/request", auth.requestPasswordReset],
     ["POST /api/password-reset/confirm", auth.confirmPasswordReset],
     ["GET /api/libraries", libraries.list],
+    ["GET /api/members", members.list],
   ]);
 
   // Dynamic routes with a path parameter, tried when no static route matches.
@@ -63,6 +66,18 @@ export async function createApp(config: Config): Promise<App> {
       method: "GET",
       pattern: /^\/api\/libraries\/(\d+)$/,
       handler: libraries.get,
+      keys: ["id"],
+    },
+    {
+      method: "DELETE",
+      pattern: /^\/api\/members\/(\d+)$/,
+      handler: members.remove,
+      keys: ["id"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/members\/(\d+)\/remove$/,
+      handler: members.remove,
       keys: ["id"],
     },
     {

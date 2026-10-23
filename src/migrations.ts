@@ -133,6 +133,18 @@ export const migrations: readonly Migration[] = [
       `);
     },
   },
+  {
+    id: "0005-member-removal",
+    up(db) {
+      // Removing a Member is a soft delete: the row stays so historical
+      // references (Assets they uploaded, invitations they sent) and a
+      // retained private Library keep working. A non-NULL removed_at means
+      // the Member cannot log in and is no longer listed as active.
+      db.exec(`
+        ALTER TABLE member ADD COLUMN removed_at INTEGER;
+      `);
+    },
+  },
 ];
 
 /**
