@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { makeJpeg } from "./helpers/images.ts";
+import { makeJpeg, makePng } from "./helpers/images.ts";
 import { startFakeS3, type FakeS3 } from "./helpers/s3.ts";
 import { startTestApp, sessionCookie, type TestApp } from "./helpers/harness.ts";
 
@@ -346,6 +346,110 @@ test("the documented restore script recovers the database and originals", async 
       assert.equal(download.status, 200);
       const restoredBytes = Buffer.from(await download.arrayBuffer());
       assert.ok(restoredBytes.equals(bytes));
+    } finally {
+      await restored.stop();
+    }
+  } finally {
+    await app.stop();
+    await s3.stop();
+    rmSync(restoreDir, { recursive: true, force: true });
+  }
+});
+
+test("restore can pick a named backup and replaces stale local data", async () => {
+  const s3 = await startFakeS3();
+  const app = await startTestApp(backupEnv(s3));
+  const restoreDir = mkdtempSync(join(tmpdir(), "familio-restore-"));
+  try {
+    const cookie = await setupAdmin(app);
+    const lib = await privateLibrary(app, cookie);
+
+    const firstBytes = await makeJpeg();
+    const first = await upload(app, cookie, lib.id, firstBytes, "first.jpg");
+    assert.equal(
+      (
+        await app.fetch("/api/admin/backups", {
+          method: "POST",
+          headers: { cookie },
+        })
+      ).status,
+      201,
+    );
+    const firstBackupId = (
+      JSON.parse(s3.objects.get("familio/latest.json")!.toString("utf8")) as {
+        id: string;
+      }
+    ).id;
+
+    await upload(app, cookie, lib.id, await makePng(), "second.png");
+    assert.equal(
+      (
+        await app.fetch("/api/admin/backups", {
+          method: "POST",
+          headers: { cookie },
+        })
+      ).status,
+      201,
+    );
+    const secondBackupId = (
+      JSON.parse(s3.objects.get("familio/latest.json")!.toString("utf8")) as {
+        id: string;
+      }
+    ).id;
+    assert.notEqual(firstBackupId, secondBackupId);
+
+    // A previous restore or a crashed run may have left stale files behind.
+    mkdirSync(join(restoreDir, "originals"), { recursive: true });
+    writeFileSync(join(restoreDir, "originals", "stale.jpg"), "stale");
+    writeFileSync(join(restoreDir, "familio.db-wal"), "stale");
+    writeFileSync(join(restoreDir, "familio.db-shm"), "stale");
+
+    await execFileAsync(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        join(repoRoot, "src", "restore.ts"),
+        "--destination",
+        restoreDir,
+        "--backup",
+        firstBackupId,
+      ],
+      {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          ...backupEnv(s3),
+          DATABASE_PATH: join(restoreDir, "familio.db"),
+          ORIGINALS_DIR: join(restoreDir, "originals"),
+          SESSION_SECRET: "restore-secret-value-at-least-sixteen-chars",
+        },
+      },
+    );
+
+    assert.equal(existsSync(join(restoreDir, "familio.db-wal")), false);
+    assert.equal(existsSync(join(restoreDir, "familio.db-shm")), false);
+    assert.equal(existsSync(join(restoreDir, "originals", "stale.jpg")), false);
+
+    const restored = await startTestApp({
+      DATABASE_PATH: join(restoreDir, "familio.db"),
+      ORIGINALS_DIR: join(restoreDir, "originals"),
+    });
+    try {
+      const login = await restored.fetch("/api/login", {
+        method: "POST",
+        body: JSON.stringify({ email: ADMIN_EMAIL, password: PASSWORD }),
+      });
+      assert.equal(login.status, 200);
+      const restoredCookie = sessionCookie(login)!;
+      const list = await restored.fetch(`/api/libraries/${lib.id}/assets`, {
+        headers: { cookie: restoredCookie },
+      });
+      const { assets } = (await list.json()) as { assets: Asset[] };
+      assert.deepEqual(
+        assets.map((asset) => asset.id),
+        [first.id],
+      );
     } finally {
       await restored.stop();
     }

@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -69,24 +76,54 @@ export async function restoreBackup(
     : backupKey(settings.prefix, "latest.json");
   const manifest = parseManifest(await s3.getObject(manifestKey));
 
-  const databasePath = join(destination, "familio.db");
-  const originalsDir = join(destination, "originals");
-  mkdirSync(originalsDir, { recursive: true });
-
   const databaseBytes = await s3.getObject(manifest.database.key);
   verify(databaseBytes, manifest.database.sha256, "database");
-  writeFileSync(databasePath, databaseBytes);
 
-  for (const original of manifest.originals) {
-    const path = safeRelativePath(original.path);
-    const bytes = await s3.getObject(original.key);
-    verify(bytes, original.sha256, `original ${original.path}`);
-    const target = join(originalsDir, path);
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, bytes);
+  const databasePath = join(destination, "familio.db");
+  const originalsDir = join(destination, "originals");
+  mkdirSync(destination, { recursive: true });
+
+  // Download and verify into a staging directory first, so a failed download
+  // leaves any existing database and originals untouched.
+  const stagingDir = mkdtempSync(join(destination, ".restore-"));
+  try {
+    const stagedDatabase = join(stagingDir, "familio.db");
+    writeFileSync(stagedDatabase, databaseBytes);
+
+    const stagedOriginals = join(stagingDir, "originals");
+    mkdirSync(stagedOriginals, { recursive: true });
+    for (const original of manifest.originals) {
+      const path = safeRelativePath(original.path);
+      const bytes = await s3.getObject(original.key);
+      verify(bytes, original.sha256, `original ${original.path}`);
+      const target = join(stagedOriginals, path);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, bytes);
+    }
+
+    // Remove SQLite sidecars from any previous database: replaying a stale WAL
+    // against the restored file would corrupt it.
+    rmSync(`${databasePath}-wal`, { force: true });
+    rmSync(`${databasePath}-shm`, { force: true });
+    renameSync(stagedDatabase, databasePath);
+
+    // Replace the originals tree as a whole, keeping the old one until the new
+    // one is in place so a failure can be rolled back.
+    const previousOriginals = join(stagingDir, "previous-originals");
+    if (existsSync(originalsDir)) renameSync(originalsDir, previousOriginals);
+    try {
+      renameSync(stagedOriginals, originalsDir);
+    } catch (err) {
+      if (existsSync(previousOriginals)) {
+        renameSync(previousOriginals, originalsDir);
+      }
+      throw err;
+    }
+
+    return { manifest, databasePath, originalsDir };
+  } finally {
+    rmSync(stagingDir, { recursive: true, force: true });
   }
-
-  return { manifest, databasePath, originalsDir };
 }
 
 function usage(): string {

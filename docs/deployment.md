@@ -98,8 +98,11 @@ script and boots a fresh app on the restored database and originals.
 
 ### Restore procedure
 
-Restore into an empty volume **before** starting the app, or stop the app first;
-the script replaces `familio.db` and the `originals/` tree.
+Restore before starting the app, or stop the app first; the script replaces
+`familio.db` and the `originals/` tree. It downloads and verifies everything
+into a staging directory first, then swaps the new files in, so a failed
+download leaves the existing volume untouched. Any stale `-wal`/`-shm` sidecars
+and files in `originals/` that are not part of the chosen backup are removed.
 
 1. Prepare a volume mounted at `/data` (or another destination directory).
 2. Run a one-off command in the same image with the same `BACKUP_S3_*`,
