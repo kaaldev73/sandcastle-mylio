@@ -171,6 +171,12 @@ export function createMembers(db: DatabaseSync, auth: Auth) {
             family.id,
             privateLibrary.id,
           );
+          // Albums are part of the Library too, so carry their groupings
+          // across rather than letting the Library deletion cascade them away.
+          db.prepare("UPDATE album SET library_id = ? WHERE library_id = ?").run(
+            family.id,
+            privateLibrary.id,
+          );
           db.prepare("DELETE FROM library WHERE id = ?").run(
             privateLibrary.id,
           );

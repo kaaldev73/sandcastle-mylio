@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readdirSync } from "node:fs";
 import { test } from "node:test";
 
 import { makeJpeg } from "./helpers/images.ts";
@@ -102,6 +103,56 @@ async function assetIds(
   });
   assert.equal(res.status, 200);
   return ((await res.json()) as { assets: Asset[] }).assets.map((a) => a.id);
+}
+
+interface Album {
+  id: number;
+  name: string;
+  libraryId: number;
+  assetCount: number;
+  assets: Asset[];
+}
+
+async function createAlbum(
+  app: TestApp,
+  cookie: string,
+  libraryId: number,
+  name: string,
+): Promise<Album> {
+  const res = await app.fetch(`/api/libraries/${libraryId}/albums`, {
+    method: "POST",
+    headers: { cookie },
+    body: JSON.stringify({ name }),
+  });
+  assert.equal(res.status, 201);
+  return (await res.json()) as Album;
+}
+
+async function addToAlbum(
+  app: TestApp,
+  cookie: string,
+  albumId: number,
+  assetId: number,
+): Promise<Album> {
+  const res = await app.fetch(`/api/albums/${albumId}/assets`, {
+    method: "POST",
+    headers: { cookie },
+    body: JSON.stringify({ assetId }),
+  });
+  assert.equal(res.status, 200);
+  return (await res.json()) as Album;
+}
+
+async function listAlbums(
+  app: TestApp,
+  cookie: string,
+  libraryId: number,
+): Promise<Album[]> {
+  const res = await app.fetch(`/api/libraries/${libraryId}/albums`, {
+    headers: { cookie },
+  });
+  assert.equal(res.status, 200);
+  return ((await res.json()) as { albums: Album[] }).albums;
 }
 
 function removeMember(
@@ -373,6 +424,122 @@ test("removing an unknown or already removed Member is a 404", async () => {
       (await removeMember(app, adminCookie, member.id)).status,
       404,
     );
+  } finally {
+    await app.stop();
+  }
+});
+
+test("transfer carries the private Library's Albums into the Family Library", async () => {
+  const app = await startTestApp();
+  try {
+    const adminCookie = await setupAdmin(app);
+    const { member, cookie: memberCookie } = await joinMember(
+      app,
+      adminCookie,
+      "mem@example.com",
+    );
+    const privateLib = await privateLibrary(app, memberCookie);
+    const family = await familyLibrary(app, memberCookie);
+    const asset = await upload(app, memberCookie, privateLib.id);
+    const album = await createAlbum(app, memberCookie, privateLib.id, "Holiday");
+    await addToAlbum(app, memberCookie, album.id, asset.id);
+
+    const res = await removeMember(app, adminCookie, member.id, {
+      library: "transfer",
+    });
+    assert.equal(res.status, 200);
+
+    const moved = (await listAlbums(app, adminCookie, family.id)).find(
+      (a) => a.id === album.id,
+    );
+    assert.ok(moved, "Album should move with the transferred Assets");
+    assert.equal(moved.name, "Holiday");
+    assert.equal(moved.assetCount, 1);
+    const opened = await app.fetch(`/api/albums/${album.id}`, {
+      headers: { cookie: adminCookie },
+    });
+    assert.equal(opened.status, 200);
+    assert.deepEqual(
+      ((await opened.json()) as Album).assets.map((a) => a.id),
+      [asset.id],
+    );
+  } finally {
+    await app.stop();
+  }
+});
+
+test("deleting the Library unlinks originals that nothing else references", async () => {
+  const app = await startTestApp();
+  try {
+    const adminCookie = await setupAdmin(app);
+    const { member, cookie: memberCookie } = await joinMember(
+      app,
+      adminCookie,
+      "mem@example.com",
+    );
+    const library = await privateLibrary(app, memberCookie);
+    await upload(app, memberCookie, library.id);
+    assert.equal(readdirSync(app.originalsDir).length, 1);
+
+    const res = await removeMember(app, adminCookie, member.id, {
+      library: "delete",
+      confirm: true,
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(readdirSync(app.originalsDir), []);
+  } finally {
+    await app.stop();
+  }
+});
+
+test("an invalid Library choice or an unconfirmed delete removes nothing", async () => {
+  const app = await startTestApp();
+  try {
+    const adminCookie = await setupAdmin(app);
+    const { member } = await joinMember(app, adminCookie, "mem@example.com");
+
+    assert.equal(
+      (await removeMember(app, adminCookie, member.id, { library: "burn" }))
+        .status,
+      400,
+    );
+    assert.equal((await login(app, "mem@example.com")).status, 200);
+  } finally {
+    await app.stop();
+  }
+});
+
+test("POST /api/members/:id/remove also removes a Member", async () => {
+  const app = await startTestApp();
+  try {
+    const adminCookie = await setupAdmin(app);
+    const { member } = await joinMember(app, adminCookie, "mem@example.com");
+
+    const res = await app.fetch(`/api/members/${member.id}/remove`, {
+      method: "POST",
+      headers: { cookie: adminCookie, "content-type": "application/json" },
+      body: JSON.stringify({ library: "keep" }),
+    });
+    assert.equal(res.status, 200);
+    assert.equal((await login(app, "mem@example.com")).status, 401);
+  } finally {
+    await app.stop();
+  }
+});
+
+test("a removed Member is not issued a password-reset token", async () => {
+  const app = await startTestApp();
+  try {
+    const adminCookie = await setupAdmin(app);
+    const { member } = await joinMember(app, adminCookie, "mem@example.com");
+    await removeMember(app, adminCookie, member.id);
+
+    const res = await app.fetch("/api/password-reset/request", {
+      method: "POST",
+      body: JSON.stringify({ email: "mem@example.com" }),
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { status: "ok" });
   } finally {
     await app.stop();
   }
