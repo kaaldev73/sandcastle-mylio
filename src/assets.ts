@@ -6,6 +6,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import type { Auth, Ctx } from "./auth.ts";
 import type { Config } from "./config.ts";
+import { dateRangeFromQuery, requireDate } from "./dates.ts";
 import { readCaptureDate } from "./exif.ts";
 import { HttpError, readRawBody, sendJson } from "./http.ts";
 import {
@@ -23,6 +24,7 @@ export interface AssetRow {
   byte_size: number;
   content_hash: string;
   capture_date: number;
+  date_override: number | null;
   capture_source: "exif" | "file";
   storage_path: string;
   thumbnail: Uint8Array;
@@ -31,7 +33,12 @@ export interface AssetRow {
 
 /** Columns selected wherever an AssetRow is read, kept in sync in one place. */
 export const ASSET_COLUMNS = `id, library_id, filename, mime_type, byte_size, content_hash,
-         capture_date, capture_source, storage_path, thumbnail, thumbnail_mime`;
+         capture_date, date_override, capture_source, storage_path, thumbnail, thumbnail_mime`;
+
+/** The date an Asset sits at in the Timeline: a correction wins if present. */
+export function effectiveDate(a: AssetRow): number {
+  return a.date_override ?? a.capture_date;
+}
 
 /** Public, grid-ready shape of an Asset; storage details are never exposed. */
 export function publicAsset(a: AssetRow): Record<string, unknown> {
@@ -41,8 +48,9 @@ export function publicAsset(a: AssetRow): Record<string, unknown> {
     mimeType: a.mime_type,
     byteSize: a.byte_size,
     contentHash: a.content_hash,
-    captureDate: new Date(a.capture_date).toISOString(),
+    captureDate: new Date(effectiveDate(a)).toISOString(),
     captureSource: a.capture_source,
+    dateOverridden: a.date_override !== null,
     thumbnailUrl: `/api/assets/${a.id}/thumbnail`,
     originalUrl: `/api/assets/${a.id}/original`,
   };
@@ -102,6 +110,21 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
       throw new HttpError(404, "asset_not_found");
     }
     return asset;
+  };
+
+  /** Apply a date correction shared by the two PATCH route aliases. */
+  const applyDateCorrection = (ctx: Ctx): void => {
+    const member = requireMember(ctx);
+    const asset = accessibleAsset(Number(ctx.params.id), member.id);
+    const raw =
+      ctx.body.date ?? ctx.body.captureDate ?? ctx.body.capture_date;
+    const date = requireDate(raw);
+    db.prepare("UPDATE asset SET date_override = ? WHERE id = ?").run(
+      date,
+      asset.id,
+    );
+    const updated = accessibleAsset(asset.id, member.id);
+    sendJson(ctx.res, 200, publicAsset(updated));
   };
 
   return {
@@ -189,7 +212,8 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
 
     /**
      * GET /api/libraries/:id/assets — the Library's Assets as a grid, ordered
-     * by capture date (PRD Timeline ordering), newest first.
+     * by capture date (PRD Timeline ordering), newest first. Optional from/to
+     * bounds (or start/end) limit the grid to a date range, matching Timeline.
      */
     list(ctx: Ctx): void {
       const member = requireMember(ctx);
@@ -197,13 +221,40 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
       if (!libraryAccessibleBy(db, libraryId, member.id)) {
         throw new HttpError(404, "library_not_found");
       }
+      const range = dateRangeFromQuery(
+        new URL(ctx.req.url ?? "/", "http://familio.local"),
+      );
+      const clauses = ["library_id = ?"];
+      const params: (number | string)[] = [libraryId];
+      if (range.from !== null) {
+        clauses.push("COALESCE(date_override, capture_date) >= ?");
+        params.push(range.from);
+      }
+      if (range.to !== null) {
+        clauses.push("COALESCE(date_override, capture_date) <= ?");
+        params.push(range.to);
+      }
       const assets = db
         .prepare(
-          `SELECT ${ASSET_COLUMNS} FROM asset WHERE library_id = ?
-           ORDER BY capture_date DESC, id DESC`,
+          `SELECT ${ASSET_COLUMNS} FROM asset WHERE ${clauses.join(" AND ")}
+           ORDER BY COALESCE(date_override, capture_date) DESC, id DESC`,
         )
-        .all(libraryId) as unknown as AssetRow[];
+        .all(...params) as unknown as AssetRow[];
       sendJson(ctx.res, 200, { assets: assets.map(publicAsset) });
+    },
+
+    /**
+     * PATCH /api/assets/:id/date — correct an Asset's Timeline date. The
+     * correction is stored separately from the derived capture date, and the
+     * original file on disk is never rewritten (PRD Timeline).
+     */
+    updateDate(ctx: Ctx): void {
+      applyDateCorrection(ctx);
+    },
+
+    /** PATCH /api/assets/:id — alias accepting a captureDate correction. */
+    update(ctx: Ctx): void {
+      applyDateCorrection(ctx);
     },
 
     /** GET /api/assets/:id/thumbnail — the generated thumbnail image. */

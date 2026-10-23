@@ -15,6 +15,7 @@ import type { Config } from "./config.ts";
 import { openDatabase } from "./db.ts";
 import { HttpError, parseCookies, readJsonBody, sendJson } from "./http.ts";
 import { createLibraries } from "./libraries.ts";
+import { createTimeline } from "./timeline.ts";
 
 export interface App {
   /** Start listening on config.PORT. Returns the base URL actually bound. */
@@ -37,6 +38,7 @@ export async function createApp(config: Config): Promise<App> {
   const libraries = createLibraries(db, auth);
   const assets = createAssets(db, auth, config);
   const albums = createAlbums(db, auth);
+  const timeline = createTimeline(db, auth);
   const backups = createBackups(db, auth, config);
 
   // method + path → handler. Body is parsed for every route uniformly; GET
@@ -70,6 +72,18 @@ export async function createApp(config: Config): Promise<App> {
       method: "GET",
       pattern: /^\/api\/libraries\/(\d+)$/,
       handler: libraries.get,
+      keys: ["id"],
+    },
+    {
+      method: "GET",
+      pattern: /^\/api\/libraries\/(\d+)\/timeline(?:\/(.+))?$/,
+      handler: timeline.list,
+      keys: ["id", "path"],
+    },
+    {
+      method: "GET",
+      pattern: /^\/api\/timeline\/(\d+)$/,
+      handler: timeline.listForLibrary,
       keys: ["id"],
     },
     {
@@ -126,6 +140,36 @@ export async function createApp(config: Config): Promise<App> {
       pattern: /^\/api\/albums\/(\d+)\/assets\/(\d+)$/,
       handler: albums.removeAsset,
       keys: ["id", "assetId"],
+    },
+    {
+      method: "PATCH",
+      pattern: /^\/api\/assets\/(\d+)\/date$/,
+      handler: assets.updateDate,
+      keys: ["id"],
+    },
+    {
+      method: "PATCH",
+      pattern: /^\/api\/assets\/(\d+)$/,
+      handler: assets.update,
+      keys: ["id"],
+    },
+    {
+      method: "PUT",
+      pattern: /^\/api\/assets\/(\d+)\/date$/,
+      handler: assets.updateDate,
+      keys: ["id"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/assets\/(\d+)\/date$/,
+      handler: assets.updateDate,
+      keys: ["id"],
+    },
+    {
+      method: "PUT",
+      pattern: /^\/api\/assets\/(\d+)$/,
+      handler: assets.update,
+      keys: ["id"],
     },
     {
       method: "GET",

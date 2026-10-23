@@ -82,7 +82,7 @@ export function createAlbums(db: DatabaseSync, auth: Auth) {
       .prepare(
         `SELECT ${ASSET_COLUMNS} FROM asset
          WHERE id IN (SELECT asset_id FROM album_asset WHERE album_id = ?)
-         ORDER BY capture_date DESC, id DESC`,
+         ORDER BY COALESCE(date_override, capture_date) DESC, id DESC`,
       )
       .all(album.id) as unknown as AssetRow[];
     return {

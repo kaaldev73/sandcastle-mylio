@@ -181,6 +181,21 @@ export const migrations: readonly Migration[] = [
       `);
     },
   },
+  {
+    id: "0007-timeline-date-override",
+    up(db) {
+      // A Member may correct an Asset's date so scans and badly dated files
+      // land in the right Timeline period. Keep the derived capture_date
+      // untouched and store the correction separately; the effective date is
+      // COALESCE(date_override, capture_date). The original file is never
+      // rewritten. NULL means no correction has been made.
+      db.exec(`
+        ALTER TABLE asset ADD COLUMN date_override INTEGER;
+        CREATE INDEX idx_asset_library_effective
+          ON asset (library_id, COALESCE(date_override, capture_date));
+      `);
+    },
+  },
 ];
 
 /**
