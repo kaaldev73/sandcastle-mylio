@@ -37,9 +37,16 @@ function readDisposition(ctx: Ctx): {
     ctx.body.library ??
     ctx.body.libraryAction ??
     ctx.body.library_action ??
+    ctx.body.libraryDisposition ??
+    ctx.body.library_disposition ??
+    ctx.body.privateLibrary ??
+    ctx.body.private_library ??
+    ctx.body.disposition ??
     ctx.body.action ??
     url.searchParams.get("library") ??
     url.searchParams.get("libraryAction") ??
+    url.searchParams.get("libraryDisposition") ??
+    url.searchParams.get("disposition") ??
     url.searchParams.get("action");
 
   let action: LibraryDisposition = "keep";
@@ -63,6 +70,9 @@ function readDisposition(ctx: Ctx): {
     ctx.body.confirm ??
     ctx.body.confirmation ??
     ctx.body.confirmDelete ??
+    ctx.body.confirm_delete ??
+    ctx.body.confirmLibraryDelete ??
+    ctx.body.confirm_library_delete ??
     url.searchParams.get("confirm") ??
     url.searchParams.get("confirmation");
 

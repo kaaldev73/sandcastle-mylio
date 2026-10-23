@@ -509,6 +509,117 @@ test("an invalid Library choice or an unconfirmed delete removes nothing", async
   }
 });
 
+test("keeping the private Library keeps its Albums for Admin management", async () => {
+  const app = await startTestApp();
+  try {
+    const adminCookie = await setupAdmin(app);
+    const { member, cookie: memberCookie } = await joinMember(
+      app,
+      adminCookie,
+      "mem@example.com",
+    );
+    const privateLib = await privateLibrary(app, memberCookie);
+    const asset = await upload(app, memberCookie, privateLib.id);
+    const album = await createAlbum(app, memberCookie, privateLib.id, "Holiday");
+    await addToAlbum(app, memberCookie, album.id, asset.id);
+
+    const res = await removeMember(app, adminCookie, member.id);
+    assert.equal(res.status, 200);
+
+    const kept = (await listAlbums(app, adminCookie, privateLib.id)).find(
+      (a) => a.id === album.id,
+    );
+    assert.ok(kept, "kept private Library should retain its Albums");
+    assert.equal(kept.assetCount, 1);
+    assert.deepEqual(
+      (
+        (await (
+          await app.fetch(`/api/albums/${album.id}`, {
+            headers: { cookie: adminCookie },
+          })
+        ).json()) as Album
+      ).assets.map((a) => a.id),
+      [asset.id],
+    );
+  } finally {
+    await app.stop();
+  }
+});
+
+test("the Library choice can come from query parameters", async () => {
+  const app = await startTestApp();
+  try {
+    const adminCookie = await setupAdmin(app);
+    const { member, cookie: memberCookie } = await joinMember(
+      app,
+      adminCookie,
+      "mem@example.com",
+    );
+    const privateLib = await privateLibrary(app, memberCookie);
+    const family = await familyLibrary(app, memberCookie);
+    const asset = await upload(app, memberCookie, privateLib.id);
+
+    const res = await app.fetch(
+      `/api/members/${member.id}?library=transfer`,
+      { method: "DELETE", headers: { cookie: adminCookie } },
+    );
+    assert.equal(res.status, 200);
+    assert.ok((await assetIds(app, adminCookie, family.id)).includes(asset.id));
+  } finally {
+    await app.stop();
+  }
+});
+
+test("the Library choice can use a disposition field in the body", async () => {
+  const app = await startTestApp();
+  try {
+    const adminCookie = await setupAdmin(app);
+    const { member, cookie: memberCookie } = await joinMember(
+      app,
+      adminCookie,
+      "mem@example.com",
+    );
+    const privateLib = await privateLibrary(app, memberCookie);
+    const family = await familyLibrary(app, memberCookie);
+    const asset = await upload(app, memberCookie, privateLib.id);
+
+    const res = await removeMember(app, adminCookie, member.id, {
+      disposition: "transfer",
+    });
+    assert.equal(res.status, 200);
+    assert.ok((await assetIds(app, adminCookie, family.id)).includes(asset.id));
+  } finally {
+    await app.stop();
+  }
+});
+
+test("the delete confirmation can come from query parameters", async () => {
+  const app = await startTestApp();
+  try {
+    const adminCookie = await setupAdmin(app);
+    const { member } = await joinMember(app, adminCookie, "mem@example.com");
+
+    assert.equal(
+      (
+        await app.fetch(`/api/members/${member.id}?library=delete`, {
+          method: "DELETE",
+          headers: { cookie: adminCookie },
+        })
+      ).status,
+      400,
+    );
+
+    const confirmed = await app.fetch(
+      `/api/members/${member.id}?library=delete&confirm=true`,
+      { method: "DELETE", headers: { cookie: adminCookie } },
+    );
+    assert.equal(confirmed.status, 200);
+    assert.equal((await login(app, "mem@example.com")).status, 401);
+  } finally {
+    await app.stop();
+  }
+});
+
 test("POST /api/members/:id/remove also removes a Member", async () => {
   const app = await startTestApp();
   try {
