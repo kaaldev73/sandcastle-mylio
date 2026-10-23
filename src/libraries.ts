@@ -63,7 +63,8 @@ export function createPrivateLibrary(db: DatabaseSync, ownerId: number): void {
  * Build the Libraries API: a Member can list and open their own private
  * Library and the shared Family Library, and nothing else. Access is enforced
  * on the server for every request against the authenticated Member — Admins
- * get no special read access to a private Library (ADR 0003).
+ * get no special read access to a private Library (ADR 0003), except a retained
+ * one whose owner was removed (see libraryAccessibleBy).
  */
 export function createLibraries(db: DatabaseSync, auth: Auth) {
   const accessible = (member: {

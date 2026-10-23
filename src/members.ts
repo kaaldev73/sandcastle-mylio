@@ -14,13 +14,87 @@ interface MemberRow {
   removed_at: number | null;
 }
 
-interface PrivateLibraryRow {
-  id: number;
-}
+const ACTION_BODY_KEYS = [
+  "library",
+  "libraryAction",
+  "library_action",
+  "libraryDisposition",
+  "library_disposition",
+  "privateLibrary",
+  "private_library",
+  "disposition",
+  "action",
+] as const;
+
+const ACTION_QUERY_KEYS = [
+  "library",
+  "libraryAction",
+  "libraryDisposition",
+  "disposition",
+  "action",
+] as const;
+
+const CONFIRM_BODY_KEYS = [
+  "confirm",
+  "confirmation",
+  "confirmDelete",
+  "confirm_delete",
+  "confirmLibraryDelete",
+  "confirm_library_delete",
+] as const;
+
+const CONFIRM_QUERY_KEYS = ["confirm", "confirmation"] as const;
+
+const CONFIRMATIONS = new Set(["true", "yes", "delete", "confirm"]);
 
 /** The public shape of a Member; removal state and credentials stay hidden. */
 function publicMember(m: MemberRow): { id: number; email: string; role: string } {
   return { id: m.id, email: m.email, role: m.role };
+}
+
+/**
+ * Read the first non-nullish value from the body, then from the query string.
+ * Body values win so a client can override a stale query parameter.
+ */
+function firstValue(
+  body: Record<string, unknown>,
+  query: URLSearchParams,
+  bodyKeys: readonly string[],
+  queryKeys: readonly string[],
+): unknown {
+  for (const key of bodyKeys) {
+    const value = body[key];
+    if (value !== undefined && value !== null) return value;
+  }
+  for (const key of queryKeys) {
+    const value = query.get(key);
+    if (value !== null) return value;
+  }
+  return undefined;
+}
+
+function parseDisposition(raw: unknown): LibraryDisposition {
+  if (raw === undefined || raw === null || raw === "") return "keep";
+  if (typeof raw !== "string") {
+    throw new HttpError(400, "invalid_library_action");
+  }
+
+  const normalised = raw.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  switch (normalised) {
+    case "keep":
+    case "retain":
+      return "keep";
+    case "transfer":
+    case "transfer_to_family":
+    case "family":
+    case "move_to_family":
+      return "transfer";
+    case "delete":
+    case "purge":
+      return "delete";
+    default:
+      throw new HttpError(400, "invalid_library_action");
+  }
 }
 
 /**
@@ -32,56 +106,45 @@ function readDisposition(ctx: Ctx): {
   action: LibraryDisposition;
   confirmed: boolean;
 } {
-  const url = new URL(ctx.req.url ?? "/", "http://localhost");
-  const raw =
-    ctx.body.library ??
-    ctx.body.libraryAction ??
-    ctx.body.library_action ??
-    ctx.body.libraryDisposition ??
-    ctx.body.library_disposition ??
-    ctx.body.privateLibrary ??
-    ctx.body.private_library ??
-    ctx.body.disposition ??
-    ctx.body.action ??
-    url.searchParams.get("library") ??
-    url.searchParams.get("libraryAction") ??
-    url.searchParams.get("libraryDisposition") ??
-    url.searchParams.get("disposition") ??
-    url.searchParams.get("action");
-
-  let action: LibraryDisposition = "keep";
-  if (raw !== undefined && raw !== null && raw !== "") {
-    if (typeof raw !== "string") {
-      throw new HttpError(400, "invalid_library_action");
-    }
-    const normalised = raw.trim().toLowerCase().replace(/[\s-]+/g, "_");
-    if (["keep", "retain"].includes(normalised)) action = "keep";
-    else if (
-      ["transfer", "transfer_to_family", "family", "move_to_family"].includes(
-        normalised,
-      )
-    ) {
-      action = "transfer";
-    } else if (["delete", "purge"].includes(normalised)) action = "delete";
-    else throw new HttpError(400, "invalid_library_action");
-  }
-
-  const confirm =
-    ctx.body.confirm ??
-    ctx.body.confirmation ??
-    ctx.body.confirmDelete ??
-    ctx.body.confirm_delete ??
-    ctx.body.confirmLibraryDelete ??
-    ctx.body.confirm_library_delete ??
-    url.searchParams.get("confirm") ??
-    url.searchParams.get("confirmation");
-
+  const query = new URL(ctx.req.url ?? "/", "http://localhost").searchParams;
+  const action = parseDisposition(
+    firstValue(ctx.body, query, ACTION_BODY_KEYS, ACTION_QUERY_KEYS),
+  );
+  const rawConfirm = firstValue(
+    ctx.body,
+    query,
+    CONFIRM_BODY_KEYS,
+    CONFIRM_QUERY_KEYS,
+  );
   const confirmed =
-    confirm === true ||
-    (typeof confirm === "string" &&
-      ["true", "yes", "delete", "confirm"].includes(confirm.trim().toLowerCase()));
+    rawConfirm === true ||
+    (typeof rawConfirm === "string" &&
+      CONFIRMATIONS.has(rawConfirm.trim().toLowerCase()));
 
   return { action, confirmed };
+}
+
+/**
+ * Unlink originals no surviving Asset references. Originals are
+ * content-addressed and may be shared, so each path is checked first.
+ */
+function removeUnreferencedOriginals(
+  db: DatabaseSync,
+  storagePaths: readonly string[],
+): void {
+  for (const path of storagePaths) {
+    const remaining = (
+      db
+        .prepare("SELECT COUNT(*) AS n FROM asset WHERE storage_path = ?")
+        .get(path) as { n: number }
+    ).n;
+    if (remaining > 0) continue;
+    try {
+      unlinkSync(path);
+    } catch {
+      // The file may already be gone; the database is the source of truth.
+    }
+  }
 }
 
 /**
@@ -98,14 +161,12 @@ export function createMembers(db: DatabaseSync, auth: Auth) {
     return member;
   };
 
-  const privateLibraryOf = (
-    memberId: number,
-  ): PrivateLibraryRow | undefined =>
+  const privateLibraryOf = (memberId: number): { id: number } | undefined =>
     db
       .prepare(
         "SELECT id FROM library WHERE kind = 'private' AND owner_id = ?",
       )
-      .get(memberId) as PrivateLibraryRow | undefined;
+      .get(memberId) as { id: number } | undefined;
 
   return {
     /** GET /api/members — the active Members, visible to Admins only. */
@@ -187,10 +248,9 @@ export function createMembers(db: DatabaseSync, auth: Auth) {
             family.id,
             privateLibrary.id,
           );
-          db.prepare("DELETE FROM library WHERE id = ?").run(
-            privateLibrary.id,
-          );
-        } else if (privateLibrary && action === "delete") {
+        }
+
+        if (privateLibrary && action !== "keep") {
           db.prepare("DELETE FROM library WHERE id = ?").run(
             privateLibrary.id,
           );
@@ -206,24 +266,8 @@ export function createMembers(db: DatabaseSync, auth: Auth) {
         throw err;
       }
 
-      // Originals are content-addressed and may be shared by another Asset.
-      // Only remove one once no surviving Asset points at it.
       if (action === "delete") {
-        for (const path of storagePaths) {
-          const remaining = (
-            db
-              .prepare(
-                "SELECT COUNT(*) AS n FROM asset WHERE storage_path = ?",
-              )
-              .get(path) as { n: number }
-          ).n;
-          if (remaining > 0) continue;
-          try {
-            unlinkSync(path);
-          } catch {
-            // The file may already be gone; the database is the source of truth.
-          }
-        }
+        removeUnreferencedOriginals(db, storagePaths);
       }
 
       sendJson(ctx.res, 200, {

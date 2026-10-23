@@ -287,6 +287,41 @@ test("by default removal keeps the private Library and its Assets", async () => 
   }
 });
 
+test("a retained private Library stays hidden from other Members", async () => {
+  const app = await startTestApp();
+  try {
+    const adminCookie = await setupAdmin(app);
+    const { member, cookie: memberCookie } = await joinMember(
+      app,
+      adminCookie,
+      "mem@example.com",
+    );
+    const { cookie: otherCookie } = await joinMember(
+      app,
+      adminCookie,
+      "other@example.com",
+    );
+    const library = await privateLibrary(app, memberCookie);
+
+    const res = await removeMember(app, adminCookie, member.id);
+    assert.equal(res.status, 200);
+
+    assert.ok(
+      !(await listLibraries(app, otherCookie)).some((l) => l.id === library.id),
+    );
+    assert.equal(
+      (
+        await app.fetch(`/api/libraries/${library.id}`, {
+          headers: { cookie: otherCookie },
+        })
+      ).status,
+      404,
+    );
+  } finally {
+    await app.stop();
+  }
+});
+
 test("transfer moves the private Library's Assets into the Family Library", async () => {
   const app = await startTestApp();
   try {
