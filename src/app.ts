@@ -7,6 +7,7 @@ import {
 import type { AddressInfo } from "node:net";
 import type { DatabaseSync } from "node:sqlite";
 
+import { createAlbums } from "./albums.ts";
 import { createAssets } from "./assets.ts";
 import { createAuth, type Ctx } from "./auth.ts";
 import type { Config } from "./config.ts";
@@ -35,6 +36,7 @@ export async function createApp(config: Config): Promise<App> {
   const auth = createAuth(db, config);
   const libraries = createLibraries(db, auth);
   const assets = createAssets(db, auth, config);
+  const albums = createAlbums(db, auth);
   const members = createMembers(db, auth);
 
   // method + path → handler. Body is parsed for every route uniformly; GET
@@ -94,6 +96,48 @@ export async function createApp(config: Config): Promise<App> {
       keys: ["id"],
     },
     {
+      method: "POST",
+      pattern: /^\/api\/libraries\/(\d+)\/albums$/,
+      handler: albums.create,
+      keys: ["id"],
+    },
+    {
+      method: "GET",
+      pattern: /^\/api\/libraries\/(\d+)\/albums$/,
+      handler: albums.list,
+      keys: ["id"],
+    },
+    {
+      method: "GET",
+      pattern: /^\/api\/albums\/(\d+)$/,
+      handler: albums.get,
+      keys: ["id"],
+    },
+    {
+      method: "PATCH",
+      pattern: /^\/api\/albums\/(\d+)$/,
+      handler: albums.rename,
+      keys: ["id"],
+    },
+    {
+      method: "DELETE",
+      pattern: /^\/api\/albums\/(\d+)$/,
+      handler: albums.remove,
+      keys: ["id"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/albums\/(\d+)\/assets$/,
+      handler: albums.addAsset,
+      keys: ["id"],
+    },
+    {
+      method: "DELETE",
+      pattern: /^\/api\/albums\/(\d+)\/assets\/(\d+)$/,
+      handler: albums.removeAsset,
+      keys: ["id", "assetId"],
+    },
+    {
       method: "GET",
       pattern: /^\/api\/assets\/(\d+)\/thumbnail$/,
       handler: assets.thumbnail,
@@ -110,7 +154,11 @@ export async function createApp(config: Config): Promise<App> {
   const server: Server = createServer((req, res) => {
     void handle(req, res).catch((err) => {
       if (err instanceof HttpError) {
-        sendJson(res, err.status, { error: err.code });
+        const body =
+          err.detail === undefined
+            ? { error: err.code }
+            : { error: err.code, message: err.detail };
+        sendJson(res, err.status, body);
       } else {
         sendJson(res, 500, { error: "internal_error" });
       }

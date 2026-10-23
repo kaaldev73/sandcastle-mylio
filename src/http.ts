@@ -19,9 +19,18 @@ export class HttpError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
+    message?: string,
   ) {
-    super(code);
+    super(message ?? code);
     this.name = "HttpError";
+  }
+
+  /**
+   * Human-readable detail for the client, when there is more to say than the
+   * machine-readable code. Undefined keeps the default code-only response.
+   */
+  get detail(): string | undefined {
+    return this.message === this.code ? undefined : this.message;
   }
 }
 
