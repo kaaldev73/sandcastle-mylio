@@ -29,7 +29,11 @@ const ACTION_BODY_KEYS = [
 const ACTION_QUERY_KEYS = [
   "library",
   "libraryAction",
+  "library_action",
   "libraryDisposition",
+  "library_disposition",
+  "privateLibrary",
+  "private_library",
   "disposition",
   "action",
 ] as const;
@@ -41,9 +45,20 @@ const CONFIRM_BODY_KEYS = [
   "confirm_delete",
   "confirmLibraryDelete",
   "confirm_library_delete",
+  "confirmLibraryDeletion",
+  "confirm_library_deletion",
 ] as const;
 
-const CONFIRM_QUERY_KEYS = ["confirm", "confirmation"] as const;
+const CONFIRM_QUERY_KEYS = [
+  "confirm",
+  "confirmation",
+  "confirmDelete",
+  "confirm_delete",
+  "confirmLibraryDelete",
+  "confirm_library_delete",
+  "confirmLibraryDeletion",
+  "confirm_library_deletion",
+] as const;
 
 const CONFIRMATIONS = new Set(["true", "yes", "delete", "confirm"]);
 
@@ -86,10 +101,16 @@ function parseDisposition(raw: unknown): LibraryDisposition {
       return "keep";
     case "transfer":
     case "transfer_to_family":
+    case "transfer_to_family_library":
     case "family":
+    case "family_library":
+    case "move":
     case "move_to_family":
+    case "move_to_family_library":
       return "transfer";
     case "delete":
+    case "delete_library":
+    case "remove_library":
     case "purge":
       return "delete";
     default:
