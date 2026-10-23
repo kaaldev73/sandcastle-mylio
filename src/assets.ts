@@ -80,7 +80,7 @@ function clientFilename(ctx: Ctx): string | null {
 const SUPPORTED_FORMATS =
   "JPEG, PNG, GIF, WebP, TIFF, HEIC/HEIF and common RAW formats";
 
-/** Describe the uploaded file in an error, or fall back to a neutral phrase. */
+/** Describe a submitted file in an error, or fall back to a neutral phrase. */
 function describeFile(name: string | null): string {
   return name === null ? "this file" : `"${name}"`;
 }

@@ -48,7 +48,11 @@ async function setupAdmin(app: TestApp): Promise<string> {
   return sessionCookie(res)!;
 }
 
-async function joinMember(app: TestApp, adminCookie: string, email: string): Promise<string> {
+async function joinMember(
+  app: TestApp,
+  adminCookie: string,
+  email: string,
+): Promise<string> {
   const invited = await app.fetch("/api/invitations", {
     method: "POST",
     headers: { cookie: adminCookie },
@@ -93,7 +97,11 @@ test("an Admin imports a folder into a chosen Library, keeping originals and rea
     writeFileSync(join(importRoot, "trip", "holiday.jpg"), exifBytes);
     writeFileSync(join(importRoot, "scanned.png"), plainBytes);
     const fileDate = Date.UTC(2019, 0, 2, 3, 4, 5);
-    utimesSync(join(importRoot, "scanned.png"), fileDate / 1000, fileDate / 1000);
+    utimesSync(
+      join(importRoot, "scanned.png"),
+      fileDate / 1000,
+      fileDate / 1000,
+    );
     writeFileSync(join(importRoot, "notes.txt"), "not a photo");
 
     const res = await importFolder(app, cookie, library.id);
@@ -138,10 +146,14 @@ test("re-running a Server Import skips files already imported", async () => {
     const library = await privateLibrary(app, cookie);
     writeFileSync(join(importRoot, "one.jpg"), await makeJpeg());
 
-    const first = (await (await importFolder(app, cookie, library.id)).json()) as ImportResult;
+    const first = (await (
+      await importFolder(app, cookie, library.id)
+    ).json()) as ImportResult;
     assert.equal(first.imported, 1);
 
-    const second = (await (await importFolder(app, cookie, library.id)).json()) as ImportResult;
+    const second = (await (
+      await importFolder(app, cookie, library.id)
+    ).json()) as ImportResult;
     assert.equal(second.imported, 0);
     assert.equal(second.skipped, 1);
     assert.equal(second.skippedFiles.length, 1);
@@ -165,11 +177,20 @@ test("only Admins can run a Server Import", async () => {
     const memberCookie = await joinMember(app, adminCookie, "mem@example.com");
     const memberLibrary = await privateLibrary(app, memberCookie);
 
-    assert.equal((await importFolder(app, memberCookie, memberLibrary.id)).status, 403);
-    assert.equal((await importFolder(app, adminCookie, memberLibrary.id)).status, 404);
     assert.equal(
-      (await app.fetch(`/api/libraries/${memberLibrary.id}/import`, { method: "POST" }))
-        .status,
+      (await importFolder(app, memberCookie, memberLibrary.id)).status,
+      403,
+    );
+    assert.equal(
+      (await importFolder(app, adminCookie, memberLibrary.id)).status,
+      404,
+    );
+    assert.equal(
+      (
+        await app.fetch(`/api/libraries/${memberLibrary.id}/import`, {
+          method: "POST",
+        })
+      ).status,
       401,
     );
   } finally {
@@ -185,11 +206,15 @@ test("a Server Import without a configured folder is refused clearly", async () 
     const library = await privateLibrary(app, cookie);
     const res = await importFolder(app, cookie, library.id);
     assert.equal(res.status, 409);
-    assert.equal(((await res.json()) as { error: string }).error, "import_not_configured");
+    assert.equal(
+      ((await res.json()) as { error: string }).error,
+      "import_not_configured",
+    );
   } finally {
     await app.stop();
   }
 });
+
 test("an Admin can choose the Library through the admin import endpoint", async () => {
   const importRoot = mkdtempSync(join(tmpdir(), "familio-import-"));
   const app = await startTestApp({ SERVER_IMPORT_DIR: importRoot });

@@ -3,6 +3,7 @@ import {
   readdirSync,
   readFileSync,
   statSync,
+  type Dirent,
 } from "node:fs";
 import {
   basename,
@@ -18,7 +19,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { ingestAsset, publicAsset, type AssetRow } from "./assets.ts";
 import type { Auth, Ctx } from "./auth.ts";
 import type { Config } from "./config.ts";
-import { HttpError, sendJson } from "./http.ts";
+import { firstValue, HttpError, sendJson } from "./http.ts";
 import { libraryAccessibleBy } from "./libraries.ts";
 
 const LIBRARY_KEYS = [
@@ -62,26 +63,8 @@ interface SourceFile {
   absolutePath: string;
 }
 
-/** Read the first non-nullish body value, then query value, for a set of keys. */
-function firstValue(
-  ctx: Ctx,
-  keys: readonly string[],
-): unknown {
-  for (const key of keys) {
-    const value = ctx.body[key];
-    if (value !== undefined && value !== null) return value;
-  }
-  const query = new URL(ctx.req.url ?? "/", "http://familio.local").searchParams;
-  for (const key of keys) {
-    const value = query.get(key);
-    if (value !== null) return value;
-  }
-  return undefined;
-}
-
-function parseLibraryId(ctx: Ctx): number {
-  const fromPath = ctx.params.id;
-  const raw = fromPath ?? firstValue(ctx, LIBRARY_KEYS);
+function parseLibraryId(ctx: Ctx, query: URLSearchParams): number {
+  const raw = ctx.params.id ?? firstValue(ctx.body, query, LIBRARY_KEYS);
   const id = typeof raw === "number" ? raw : Number(raw);
   if (!Number.isInteger(id) || id <= 0) {
     throw new HttpError(400, "missing_library");
@@ -89,16 +72,40 @@ function parseLibraryId(ctx: Ctx): number {
   return id;
 }
 
-/** List regular files below a folder, skipping symlinks and other specials. */
-function listFiles(root: string, dir = root): SourceFile[] {
+/** Render a filesystem path with "/" separators, stable across platforms. */
+function toPosixPath(path: string): string {
+  return path.split(sep).join("/");
+}
+
+/**
+ * List regular files below a folder, skipping symlinks and other specials. A
+ * folder that cannot be read is reported and the walk continues, so one bad
+ * directory never aborts the whole import.
+ */
+function listFiles(
+  root: string,
+  failed: ProblemFile[],
+  dir = root,
+): SourceFile[] {
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch (err) {
+    failed.push({
+      path: dir === root ? "." : toPosixPath(relative(root, dir)),
+      reason: err instanceof Error ? err.message : String(err),
+    });
+    return [];
+  }
+
   const files: SourceFile[] = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+  for (const entry of entries) {
     const absolutePath = join(dir, entry.name);
     if (entry.isDirectory()) {
-      files.push(...listFiles(root, absolutePath));
+      files.push(...listFiles(root, failed, absolutePath));
     } else if (entry.isFile()) {
       files.push({
-        path: relative(root, absolutePath).split(sep).join("/"),
+        path: toPosixPath(relative(root, absolutePath)),
         absolutePath,
       });
     }
@@ -123,27 +130,34 @@ export function createImports(db: DatabaseSync, auth: Auth, config: Config) {
   };
 
   /** Resolve the folder to read, confined to the configured import root. */
-  const resolveSource = (ctx: Ctx): { root: string; source: string; label: string } => {
+  const resolveSource = (
+    ctx: Ctx,
+    query: URLSearchParams,
+  ): { root: string; folder: string; label: string } => {
     if (!config.SERVER_IMPORT_DIR) {
       throw new HttpError(409, "import_not_configured");
     }
     const root = resolve(config.SERVER_IMPORT_DIR);
-    const requested = firstValue(ctx, PATH_KEYS);
+    const requested = firstValue(ctx.body, query, PATH_KEYS);
     if (requested !== undefined && typeof requested !== "string") {
       throw new HttpError(400, "invalid_import_path");
     }
-    const source =
+    const folder =
       typeof requested === "string" && requested.trim() !== ""
         ? resolve(root, requested.trim())
         : root;
-    const inside = relative(root, source);
+    const inside = relative(root, folder);
     if (inside.startsWith("..") || isAbsolute(inside)) {
       throw new HttpError(400, "invalid_import_path");
     }
-    if (!existsSync(source) || !statSync(source).isDirectory()) {
+    if (!existsSync(folder) || !statSync(folder).isDirectory()) {
       throw new HttpError(404, "import_folder_not_found");
     }
-    return { root, source, label: inside === "" ? "." : inside.split(sep).join("/") };
+    return {
+      root,
+      folder,
+      label: inside === "" ? "." : toPosixPath(inside),
+    };
   };
 
   return {
@@ -155,17 +169,19 @@ export function createImports(db: DatabaseSync, auth: Auth, config: Config) {
      */
     async run(ctx: Ctx): Promise<void> {
       const admin = requireAdmin(ctx);
-      const libraryId = parseLibraryId(ctx);
+      const query = new URL(ctx.req.url ?? "/", "http://familio.local")
+        .searchParams;
+      const libraryId = parseLibraryId(ctx, query);
       if (!libraryAccessibleBy(db, libraryId, admin.id)) {
         throw new HttpError(404, "library_not_found");
       }
-      const { root, source, label } = resolveSource(ctx);
-      const files = listFiles(root, source);
+      const { root, folder, label } = resolveSource(ctx, query);
 
       const imported: AssetRow[] = [];
       const skipped: SkippedFile[] = [];
       const unsupported: ProblemFile[] = [];
       const failed: ProblemFile[] = [];
+      const files = listFiles(root, failed, folder);
 
       const alreadyImported = db.prepare(
         `SELECT asset_id FROM server_import_file
@@ -220,34 +236,29 @@ export function createImports(db: DatabaseSync, auth: Auth, config: Config) {
           );
           imported.push(asset);
         } catch (err) {
-          if (err instanceof HttpError && err.status === 415) {
-            if (err.code === "unsupported_type") {
-              unsupported.push({
-                path: file.path,
-                reason: err.detail ?? err.code,
-              });
-            } else {
-              failed.push({ path: file.path, reason: err.detail ?? err.code });
-            }
-            continue;
-          }
-          throw err;
+          if (!(err instanceof HttpError) || err.status !== 415) throw err;
+          const problem = { path: file.path, reason: err.detail ?? err.code };
+          if (err.code === "unsupported_type") unsupported.push(problem);
+          else failed.push(problem);
         }
       }
 
       const assets = imported.map(publicAsset);
-      sendJson(ctx.res, 200, {
-        status: "ok",
-        libraryId,
-        source: label,
+      const counts = {
         imported: imported.length,
         skipped: skipped.length,
         unsupported: unsupported.length,
         failed: failed.length,
-        importedCount: imported.length,
-        skippedCount: skipped.length,
-        unsupportedCount: unsupported.length,
-        failedCount: failed.length,
+      };
+      sendJson(ctx.res, 200, {
+        status: "ok",
+        libraryId,
+        source: label,
+        ...counts,
+        importedCount: counts.imported,
+        skippedCount: counts.skipped,
+        unsupportedCount: counts.unsupported,
+        failedCount: counts.failed,
         assets,
         importedAssets: assets,
         skippedFiles: skipped,

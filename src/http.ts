@@ -95,6 +95,27 @@ export function parseCookies(header: string | undefined): Map<string, string> {
   return out;
 }
 
+/**
+ * Read the first non-nullish value for a set of keys from the parsed body,
+ * then from the query string. Body values win so a client can override a
+ * stale query parameter.
+ */
+export function firstValue(
+  body: Record<string, unknown>,
+  query: URLSearchParams,
+  keys: readonly string[],
+): unknown {
+  for (const key of keys) {
+    const value = body[key];
+    if (value !== undefined && value !== null) return value;
+  }
+  for (const key of keys) {
+    const value = query.get(key);
+    if (value !== null) return value;
+  }
+  return undefined;
+}
+
 /** Read a required non-empty string field from a parsed body. */
 export function requireString(
   body: Record<string, unknown>,

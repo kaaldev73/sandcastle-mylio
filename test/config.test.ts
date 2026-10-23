@@ -40,6 +40,20 @@ test("valid environment produces a frozen config with defaults applied", () => {
   assert.ok(Object.isFrozen(config));
 });
 
+test("the import folder can be supplied through a common alias", () => {
+  const config = loadConfig({ ...valid, IMPORT_DIR: "/srv/imports" });
+  assert.equal(config.SERVER_IMPORT_DIR, "/srv/imports");
+});
+
+test("an explicit SERVER_IMPORT_DIR wins over an alias", () => {
+  const config = loadConfig({
+    ...valid,
+    SERVER_IMPORT_DIR: "/canonical",
+    IMPORT_DIR: "/alias",
+  });
+  assert.equal(config.SERVER_IMPORT_DIR, "/canonical");
+});
+
 test("backup target variables must be supplied together", () => {
   assert.throws(
     () =>

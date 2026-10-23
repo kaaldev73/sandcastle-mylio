@@ -3,7 +3,7 @@ import { unlinkSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 
 import type { Auth, Ctx } from "./auth.ts";
-import { HttpError, sendJson } from "./http.ts";
+import { firstValue, HttpError, sendJson } from "./http.ts";
 
 type LibraryDisposition = "keep" | "transfer" | "delete";
 
@@ -42,26 +42,6 @@ const CONFIRMATIONS = new Set(["true", "yes", "delete", "confirm"]);
 /** The public shape of a Member; removal state and credentials stay hidden. */
 function publicMember(m: MemberRow): { id: number; email: string; role: string } {
   return { id: m.id, email: m.email, role: m.role };
-}
-
-/**
- * Read the first non-nullish value from the body, then from the query string.
- * Body values win so a client can override a stale query parameter.
- */
-function firstValue(
-  body: Record<string, unknown>,
-  query: URLSearchParams,
-  keys: readonly string[],
-): unknown {
-  for (const key of keys) {
-    const value = body[key];
-    if (value !== undefined && value !== null) return value;
-  }
-  for (const key of keys) {
-    const value = query.get(key);
-    if (value !== null) return value;
-  }
-  return undefined;
 }
 
 function parseDisposition(raw: unknown): LibraryDisposition {

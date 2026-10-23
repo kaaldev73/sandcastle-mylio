@@ -102,8 +102,11 @@ function withServerImportAliases(
   env: Record<string, string | undefined>,
 ): Record<string, string | undefined> {
   if (env.SERVER_IMPORT_DIR !== undefined) return env;
-  const alias = SERVER_IMPORT_ALIASES.find((key) => env[key] !== undefined);
-  return alias === undefined ? env : { ...env, SERVER_IMPORT_DIR: env[alias] };
+  for (const alias of SERVER_IMPORT_ALIASES) {
+    const value = env[alias];
+    if (value !== undefined) return { ...env, SERVER_IMPORT_DIR: value };
+  }
+  return env;
 }
 
 export type Config = Readonly<z.infer<typeof configSchema>>;
