@@ -17,6 +17,7 @@ import { HttpError, parseCookies, readJsonBody, sendJson } from "./http.ts";
 import { createImports } from "./imports.ts";
 import { createLibraries } from "./libraries.ts";
 import { createMembers } from "./members.ts";
+import { createRatings } from "./ratings.ts";
 import { createTimeline } from "./timeline.ts";
 
 export interface App {
@@ -43,6 +44,7 @@ export async function createApp(config: Config): Promise<App> {
   const members = createMembers(db, auth);
   const imports = createImports(db, auth, config);
   const timeline = createTimeline(db, auth);
+  const ratings = createRatings(db, auth);
   const backups = createBackups(db, auth, config);
 
   // method + path → handler. Body is parsed for every route uniformly; GET
@@ -83,6 +85,24 @@ export async function createApp(config: Config): Promise<App> {
       pattern: /^\/api\/libraries\/(\d+)$/,
       handler: libraries.get,
       keys: ["id"],
+    },
+    {
+      method: "GET",
+      pattern: /^\/api\/libraries\/(\d+)\/review$/,
+      handler: ratings.review,
+      keys: ["id"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/libraries\/(\d+)\/review$/,
+      handler: ratings.reviewAction,
+      keys: ["id"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/libraries\/(\d+)\/review\/(\d+)$/,
+      handler: ratings.reviewAction,
+      keys: ["id", "assetId"],
     },
     {
       method: "GET",
@@ -146,6 +166,42 @@ export async function createApp(config: Config): Promise<App> {
     },
     {
       method: "POST",
+      pattern: /^\/api\/libraries\/(\d+)\/assets\/ratings?$/,
+      handler: ratings.bulk,
+      keys: ["id"],
+    },
+    {
+      method: "PATCH",
+      pattern: /^\/api\/libraries\/(\d+)\/assets\/ratings?$/,
+      handler: ratings.bulk,
+      keys: ["id"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/libraries\/(\d+)\/ratings?$/,
+      handler: ratings.bulk,
+      keys: ["id"],
+    },
+    {
+      method: "PATCH",
+      pattern: /^\/api\/libraries\/(\d+)\/ratings?$/,
+      handler: ratings.bulk,
+      keys: ["id"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/assets\/ratings?$/,
+      handler: ratings.bulk,
+      keys: [],
+    },
+    {
+      method: "PATCH",
+      pattern: /^\/api\/assets\/ratings?$/,
+      handler: ratings.bulk,
+      keys: [],
+    },
+    {
+      method: "POST",
       pattern: /^\/api\/libraries\/(\d+)\/assets$/,
       handler: assets.upload,
       keys: ["id"],
@@ -198,6 +254,30 @@ export async function createApp(config: Config): Promise<App> {
       pattern: /^\/api\/albums\/(\d+)\/assets\/(\d+)$/,
       handler: albums.removeAsset,
       keys: ["id", "assetId"],
+    },
+    {
+      method: "PATCH",
+      pattern: /^\/api\/assets\/(\d+)\/rating$/,
+      handler: ratings.update,
+      keys: ["id"],
+    },
+    {
+      method: "PUT",
+      pattern: /^\/api\/assets\/(\d+)\/rating$/,
+      handler: ratings.update,
+      keys: ["id"],
+    },
+    {
+      method: "PATCH",
+      pattern: /^\/api\/assets\/(\d+)\/flag$/,
+      handler: ratings.updateFlag,
+      keys: ["id"],
+    },
+    {
+      method: "PATCH",
+      pattern: /^\/api\/assets\/(\d+)\/stars$/,
+      handler: ratings.updateStars,
+      keys: ["id"],
     },
     {
       method: "PATCH",

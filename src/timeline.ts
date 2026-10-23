@@ -14,6 +14,7 @@ import {
 } from "./dates.ts";
 import { HttpError, sendJson } from "./http.ts";
 import { libraryAccessibleBy } from "./libraries.ts";
+import { ratingFilterFromQuery } from "./rating.ts";
 
 type Level = "decade" | "year" | "month" | "day";
 
@@ -262,6 +263,9 @@ export function createTimeline(db: DatabaseSync, auth: Auth) {
       clauses.push("COALESCE(date_override, capture_date) <= ?");
       queryParams.push(scope.to);
     }
+    const rating = ratingFilterFromQuery(url);
+    clauses.push(...rating.clauses);
+    queryParams.push(...rating.params);
 
     const assets = db
       .prepare(

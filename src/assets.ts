@@ -15,6 +15,11 @@ import {
   type Thumbnail,
 } from "./images.ts";
 import { libraryAccessibleBy } from "./libraries.ts";
+import {
+  applyRatingChange,
+  ratingChangeFromBody,
+  ratingFilterFromQuery,
+} from "./rating.ts";
 
 export interface AssetRow {
   id: number;
@@ -29,11 +34,14 @@ export interface AssetRow {
   storage_path: string;
   thumbnail: Uint8Array;
   thumbnail_mime: string;
+  flag: "unflagged" | "pick" | "reject";
+  stars: number;
 }
 
 /** Columns selected wherever an AssetRow is read, kept in sync in one place. */
 export const ASSET_COLUMNS = `id, library_id, filename, mime_type, byte_size, content_hash,
-         capture_date, date_override, capture_source, storage_path, thumbnail, thumbnail_mime`;
+         capture_date, date_override, capture_source, storage_path, thumbnail, thumbnail_mime,
+         flag, stars`;
 
 /** The date an Asset sits at in the Timeline: a correction wins if present. */
 export function effectiveDate(a: AssetRow): number {
@@ -42,6 +50,7 @@ export function effectiveDate(a: AssetRow): number {
 
 /** Public, grid-ready shape of an Asset; storage details are never exposed. */
 export function publicAsset(a: AssetRow): Record<string, unknown> {
+  const rejected = a.flag === "reject";
   return {
     id: a.id,
     filename: a.filename,
@@ -51,6 +60,12 @@ export function publicAsset(a: AssetRow): Record<string, unknown> {
     captureDate: new Date(effectiveDate(a)).toISOString(),
     captureSource: a.capture_source,
     dateOverridden: a.date_override !== null,
+    flag: a.flag,
+    ratingFlag: a.flag,
+    stars: a.stars,
+    pick: a.flag === "pick",
+    rejected,
+    dimmed: rejected,
     thumbnailUrl: `/api/assets/${a.id}/thumbnail`,
     originalUrl: `/api/assets/${a.id}/original`,
   };
@@ -254,9 +269,8 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
       if (!libraryAccessibleBy(db, libraryId, member.id)) {
         throw new HttpError(404, "library_not_found");
       }
-      const range = dateRangeFromQuery(
-        new URL(ctx.req.url ?? "/", "http://familio.local"),
-      );
+      const url = new URL(ctx.req.url ?? "/", "http://familio.local");
+      const range = dateRangeFromQuery(url);
       const clauses = ["library_id = ?"];
       const params: (number | string)[] = [libraryId];
       if (range.from !== null) {
@@ -267,6 +281,9 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
         clauses.push("COALESCE(date_override, capture_date) <= ?");
         params.push(range.to);
       }
+      const rating = ratingFilterFromQuery(url);
+      clauses.push(...rating.clauses);
+      params.push(...rating.params);
       const assets = db
         .prepare(
           `SELECT ${ASSET_COLUMNS} FROM asset WHERE ${clauses.join(" AND ")}
@@ -285,9 +302,33 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
       applyDateCorrection(ctx);
     },
 
-    /** PATCH /api/assets/:id — alias accepting a captureDate correction. */
+    /**
+     * PATCH /api/assets/:id — update an Asset in place. Accepts a captureDate
+     * correction and/or Rating fields, so a client can adjust either without
+     * touching the original file.
+     */
     update(ctx: Ctx): void {
-      applyDateCorrection(ctx);
+      const member = requireMember(ctx);
+      const asset = accessibleAsset(Number(ctx.params.id), member.id);
+      const hasDate = ["date", "captureDate", "capture_date"].some((key) =>
+        Object.prototype.hasOwnProperty.call(ctx.body, key),
+      );
+      if (hasDate) {
+        const raw =
+          ctx.body.date ?? ctx.body.captureDate ?? ctx.body.capture_date;
+        const date = requireDate(raw);
+        db.prepare("UPDATE asset SET date_override = ? WHERE id = ?").run(
+          date,
+          asset.id,
+        );
+      }
+      const change = ratingChangeFromBody(ctx.body);
+      applyRatingChange(db, asset.id, change);
+      if (!hasDate && change.flag === undefined && change.stars === undefined) {
+        throw new HttpError(400, "missing_update");
+      }
+      const updated = accessibleAsset(asset.id, member.id);
+      sendJson(ctx.res, 200, publicAsset(updated));
     },
 
     /** GET /api/assets/:id/thumbnail — the generated thumbnail image. */

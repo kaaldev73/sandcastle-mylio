@@ -231,6 +231,24 @@ export const migrations: readonly Migration[] = [
       `);
     },
   },
+  {
+    id: "0010-ratings",
+    up(db) {
+      // Rating is a Member's judgement of an Asset: a Pick/Reject/unflagged
+      // flag and 1-5 stars (GLOSSARY, PRD Rating). A flag defaults to
+      // unflagged and stars to 0 (no stars); 0 also clears the stars. Keeping
+      // them as separate columns lets setting one leave the other untouched,
+      // and lets either be cleared. The original file is never rewritten.
+      db.exec(`
+        ALTER TABLE asset ADD COLUMN flag TEXT NOT NULL DEFAULT 'unflagged'
+          CHECK (flag IN ('pick', 'reject', 'unflagged'));
+        ALTER TABLE asset ADD COLUMN stars INTEGER NOT NULL DEFAULT 0
+          CHECK (stars BETWEEN 0 AND 5);
+        CREATE INDEX idx_asset_library_flag ON asset (library_id, flag);
+        CREATE INDEX idx_asset_library_stars ON asset (library_id, stars);
+      `);
+    },
+  },
 ];
 
 /**
