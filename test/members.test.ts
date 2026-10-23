@@ -690,3 +690,93 @@ test("a removed Member is not issued a password-reset token", async () => {
     await app.stop();
   }
 });
+
+test("a reset token issued before removal cannot be used afterwards", async () => {
+  const app = await startTestApp();
+  try {
+    const adminCookie = await setupAdmin(app);
+    const { member } = await joinMember(app, adminCookie, "mem@example.com");
+
+    const requested = await app.fetch("/api/password-reset/request", {
+      method: "POST",
+      body: JSON.stringify({ email: "mem@example.com" }),
+    });
+    assert.equal(requested.status, 200);
+    const { token } = (await requested.json()) as { token: string };
+    assert.ok(token);
+
+    assert.equal(
+      (await removeMember(app, adminCookie, member.id)).status,
+      200,
+    );
+
+    const confirmed = await app.fetch("/api/password-reset/confirm", {
+      method: "POST",
+      body: JSON.stringify({ token, password: "a-brand-new-password" }),
+    });
+    assert.equal(confirmed.status, 404);
+    assert.equal((await login(app, "mem@example.com")).status, 401);
+    assert.equal(
+      (await login(app, "mem@example.com", "a-brand-new-password")).status,
+      401,
+    );
+  } finally {
+    await app.stop();
+  }
+});
+
+test("the Library choice and confirmation accept query alias names", async () => {
+  const app = await startTestApp();
+  try {
+    const adminCookie = await setupAdmin(app);
+    const { member, cookie: memberCookie } = await joinMember(
+      app,
+      adminCookie,
+      "mem@example.com",
+    );
+    const privateLib = await privateLibrary(app, memberCookie);
+    const family = await familyLibrary(app, memberCookie);
+    const asset = await upload(app, memberCookie, privateLib.id);
+
+    const transferred = await app.fetch(
+      `/api/members/${member.id}?private_library=transfer_to_family_library`,
+      { method: "DELETE", headers: { cookie: adminCookie } },
+    );
+    assert.equal(transferred.status, 200);
+    assert.ok((await assetIds(app, adminCookie, family.id)).includes(asset.id));
+
+    const { member: second, cookie: secondCookie } = await joinMember(
+      app,
+      adminCookie,
+      "second@example.com",
+    );
+    const secondLib = await privateLibrary(app, secondCookie);
+    const secondAsset = await upload(app, secondCookie, secondLib.id);
+
+    assert.equal(
+      (
+        await app.fetch(
+          `/api/members/${second.id}?libraryDisposition=delete`,
+          { method: "DELETE", headers: { cookie: adminCookie } },
+        )
+      ).status,
+      400,
+    );
+
+    const deleted = await app.fetch(
+      `/api/members/${second.id}?libraryDisposition=delete&confirm_delete=true`,
+      { method: "DELETE", headers: { cookie: adminCookie } },
+    );
+    assert.equal(deleted.status, 200);
+    assert.equal(
+      (
+        await app.fetch(secondAsset.originalUrl, {
+          headers: { cookie: adminCookie },
+        })
+      ).status,
+      404,
+    );
+  } finally {
+    await app.stop();
+  }
+});

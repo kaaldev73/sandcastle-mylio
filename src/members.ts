@@ -14,7 +14,7 @@ interface MemberRow {
   removed_at: number | null;
 }
 
-const ACTION_BODY_KEYS = [
+const ACTION_KEYS = [
   "library",
   "libraryAction",
   "library_action",
@@ -26,24 +26,16 @@ const ACTION_BODY_KEYS = [
   "action",
 ] as const;
 
-const ACTION_QUERY_KEYS = [
-  "library",
-  "libraryAction",
-  "libraryDisposition",
-  "disposition",
-  "action",
-] as const;
-
-const CONFIRM_BODY_KEYS = [
+const CONFIRM_KEYS = [
   "confirm",
   "confirmation",
   "confirmDelete",
   "confirm_delete",
   "confirmLibraryDelete",
   "confirm_library_delete",
+  "confirmLibraryDeletion",
+  "confirm_library_deletion",
 ] as const;
-
-const CONFIRM_QUERY_KEYS = ["confirm", "confirmation"] as const;
 
 const CONFIRMATIONS = new Set(["true", "yes", "delete", "confirm"]);
 
@@ -59,14 +51,13 @@ function publicMember(m: MemberRow): { id: number; email: string; role: string }
 function firstValue(
   body: Record<string, unknown>,
   query: URLSearchParams,
-  bodyKeys: readonly string[],
-  queryKeys: readonly string[],
+  keys: readonly string[],
 ): unknown {
-  for (const key of bodyKeys) {
+  for (const key of keys) {
     const value = body[key];
     if (value !== undefined && value !== null) return value;
   }
-  for (const key of queryKeys) {
+  for (const key of keys) {
     const value = query.get(key);
     if (value !== null) return value;
   }
@@ -86,10 +77,16 @@ function parseDisposition(raw: unknown): LibraryDisposition {
       return "keep";
     case "transfer":
     case "transfer_to_family":
+    case "transfer_to_family_library":
     case "family":
+    case "family_library":
+    case "move":
     case "move_to_family":
+    case "move_to_family_library":
       return "transfer";
     case "delete":
+    case "delete_library":
+    case "remove_library":
     case "purge":
       return "delete";
     default:
@@ -107,15 +104,8 @@ function readDisposition(ctx: Ctx): {
   confirmed: boolean;
 } {
   const query = new URL(ctx.req.url ?? "/", "http://localhost").searchParams;
-  const action = parseDisposition(
-    firstValue(ctx.body, query, ACTION_BODY_KEYS, ACTION_QUERY_KEYS),
-  );
-  const rawConfirm = firstValue(
-    ctx.body,
-    query,
-    CONFIRM_BODY_KEYS,
-    CONFIRM_QUERY_KEYS,
-  );
+  const action = parseDisposition(firstValue(ctx.body, query, ACTION_KEYS));
+  const rawConfirm = firstValue(ctx.body, query, CONFIRM_KEYS);
   const confirmed =
     rawConfirm === true ||
     (typeof rawConfirm === "string" &&
