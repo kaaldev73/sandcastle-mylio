@@ -15,6 +15,7 @@ import type { Config } from "./config.ts";
 import { openDatabase } from "./db.ts";
 import { HttpError, parseCookies, readJsonBody, sendJson } from "./http.ts";
 import { createLibraries } from "./libraries.ts";
+import { createMembers } from "./members.ts";
 import { createTimeline } from "./timeline.ts";
 
 export interface App {
@@ -38,6 +39,7 @@ export async function createApp(config: Config): Promise<App> {
   const libraries = createLibraries(db, auth);
   const assets = createAssets(db, auth, config);
   const albums = createAlbums(db, auth);
+  const members = createMembers(db, auth);
   const timeline = createTimeline(db, auth);
   const backups = createBackups(db, auth, config);
 
@@ -53,9 +55,13 @@ export async function createApp(config: Config): Promise<App> {
     ["POST /api/password-reset/request", auth.requestPasswordReset],
     ["POST /api/password-reset/confirm", auth.confirmPasswordReset],
     ["GET /api/libraries", libraries.list],
+<<<<<<< HEAD
     ["GET /api/admin/backups", backups.status],
     ["POST /api/admin/backups", backups.runNow],
     ["GET /api/admin/disk", backups.disk],
+=======
+    ["GET /api/members", members.list],
+>>>>>>> sandcastle/issue-16
   ]);
 
   // Dynamic routes with a path parameter, tried when no static route matches.
@@ -84,6 +90,18 @@ export async function createApp(config: Config): Promise<App> {
       method: "GET",
       pattern: /^\/api\/timeline\/(\d+)$/,
       handler: timeline.listForLibrary,
+      keys: ["id"],
+    },
+    {
+      method: "DELETE",
+      pattern: /^\/api\/members\/(\d+)$/,
+      handler: members.remove,
+      keys: ["id"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/members\/(\d+)\/remove$/,
+      handler: members.remove,
       keys: ["id"],
     },
     {

@@ -163,7 +163,19 @@ export const migrations: readonly Migration[] = [
     },
   },
   {
-    id: "0006-backups",
+    id: "0006-member-removal",
+    up(db) {
+      // Removing a Member is a soft delete: the row stays so historical
+      // references (Assets they uploaded, invitations they sent) and a
+      // retained private Library keep working. A non-NULL removed_at means
+      // the Member cannot log in and is no longer listed as active.
+      db.exec(`
+        ALTER TABLE member ADD COLUMN removed_at INTEGER;
+      `);
+    },
+  },
+  {
+    id: "0007-backups",
     up(db) {
       // Each scheduled or manual backup is one row, so Admins can see the last
       // run's time, outcome and size. Timestamps are epoch milliseconds; the
@@ -182,7 +194,7 @@ export const migrations: readonly Migration[] = [
     },
   },
   {
-    id: "0007-timeline-date-override",
+    id: "0008-timeline-date-override",
     up(db) {
       // A Member may correct an Asset's date so scans and badly dated files
       // land in the right Timeline period. Keep the derived capture_date
