@@ -172,6 +172,7 @@ test("opening a Library that does not exist is a 404", async () => {
       headers: { cookie: adminCookie },
     });
     assert.equal(res.status, 404);
+    assert.deepEqual(await res.json(), { error: "library_not_found" });
   } finally {
     await app.stop();
   }

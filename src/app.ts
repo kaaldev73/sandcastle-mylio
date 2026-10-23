@@ -95,7 +95,11 @@ export async function createApp(config: Config): Promise<App> {
   const server: Server = createServer((req, res) => {
     void handle(req, res).catch((err) => {
       if (err instanceof HttpError) {
-        sendJson(res, err.status, { error: err.code });
+        const body =
+          err.detail === undefined
+            ? { error: err.code }
+            : { error: err.code, message: err.detail };
+        sendJson(res, err.status, body);
       } else {
         sendJson(res, 500, { error: "internal_error" });
       }
