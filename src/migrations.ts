@@ -133,6 +133,35 @@ export const migrations: readonly Migration[] = [
       `);
     },
   },
+  {
+    id: "0005-albums",
+    up(db) {
+      // An Album is a named, virtual grouping of Assets within one Library
+      // (GLOSSARY, PRD Albums). Membership is a join row and never copies or
+      // moves the Asset's file: the Asset still belongs to exactly one Library.
+      // Deleting an Album cascades only its membership rows, leaving every
+      // Asset in the Library untouched; deleting an Asset likewise drops its
+      // memberships. The (album_id, asset_id) primary key makes an Asset appear
+      // at most once per Album, and the same Asset may join many Albums.
+      db.exec(`
+        CREATE TABLE album (
+          id          INTEGER PRIMARY KEY,
+          library_id  INTEGER NOT NULL REFERENCES library(id) ON DELETE CASCADE,
+          name        TEXT NOT NULL,
+          created_at  INTEGER NOT NULL
+        );
+        CREATE INDEX idx_album_library ON album (library_id);
+
+        CREATE TABLE album_asset (
+          album_id  INTEGER NOT NULL REFERENCES album(id) ON DELETE CASCADE,
+          asset_id  INTEGER NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
+          added_at  INTEGER NOT NULL,
+          PRIMARY KEY (album_id, asset_id)
+        );
+        CREATE INDEX idx_album_asset_asset ON album_asset (asset_id);
+      `);
+    },
+  },
 ];
 
 /**

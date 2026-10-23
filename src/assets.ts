@@ -11,7 +11,7 @@ import { HttpError, readRawBody, sendJson } from "./http.ts";
 import { detectImageType, makeThumbnail } from "./images.ts";
 import { libraryAccessibleBy } from "./libraries.ts";
 
-interface AssetRow {
+export interface AssetRow {
   id: number;
   library_id: number;
   filename: string;
@@ -26,11 +26,11 @@ interface AssetRow {
 }
 
 /** Columns selected wherever an AssetRow is read, kept in sync in one place. */
-const ASSET_COLUMNS = `id, library_id, filename, mime_type, byte_size, content_hash,
+export const ASSET_COLUMNS = `id, library_id, filename, mime_type, byte_size, content_hash,
          capture_date, capture_source, storage_path, thumbnail, thumbnail_mime`;
 
 /** Public, grid-ready shape of an Asset; storage details are never exposed. */
-function publicAsset(a: AssetRow): Record<string, unknown> {
+export function publicAsset(a: AssetRow): Record<string, unknown> {
   return {
     id: a.id,
     filename: a.filename,
