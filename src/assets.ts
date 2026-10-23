@@ -85,6 +85,98 @@ function describeFile(name: string | null): string {
   return name === null ? "this file" : `"${name}"`;
 }
 
+export interface IngestInput {
+  readonly libraryId: number;
+  readonly uploaderId: number;
+  readonly bytes: Buffer;
+  /** Original filename; null falls back to a generated upload name. */
+  readonly filename: string | null;
+  /** File date fallback in epoch ms; null uses the moment of ingestion. */
+  readonly fileDateMs: number | null;
+}
+
+/**
+ * Store one image as an Asset in a Library. Shared by browser Upload and
+ * Server Import so both paths agree: the original is kept byte-for-byte, its
+ * content hash is recorded, a thumbnail is generated, and the capture date is
+ * read from the file (EXIF), falling back to the file date. Throws
+ * HttpError(415) for unsupported or corrupt images; callers decide whether
+ * that is fatal or a per-file report.
+ */
+export async function ingestAsset(
+  db: DatabaseSync,
+  config: Config,
+  input: IngestInput,
+): Promise<AssetRow> {
+  const submittedName =
+    input.filename === null ? null : input.filename.trim() || null;
+  const type = detectImageType(input.bytes);
+  if (!type) {
+    throw new HttpError(
+      415,
+      "unsupported_type",
+      `${describeFile(submittedName)} is not a supported image. ` +
+        `Supported formats are ${SUPPORTED_FORMATS}.`,
+    );
+  }
+
+  const contentHash = createHash("sha256").update(input.bytes).digest("hex");
+
+  // Capture date: the file's own metadata wins; otherwise the file date the
+  // client sent; otherwise the moment of ingestion. Never fail for want of a
+  // date — the Timeline must still place every Asset.
+  let captureDate = readCaptureDate(input.bytes);
+  let captureSource: "exif" | "file" = "exif";
+  if (captureDate === null) {
+    captureSource = "file";
+    captureDate = input.fileDateMs ?? Date.now();
+  }
+
+  let thumbnail: Thumbnail;
+  try {
+    thumbnail = await makeThumbnail(input.bytes);
+  } catch {
+    throw new HttpError(
+      415,
+      "corrupt_image",
+      `Could not generate a preview for ${describeFile(submittedName)}; ` +
+        "the file appears to be corrupt or incomplete.",
+    );
+  }
+
+  // Store the original untouched, content-addressed so identical bytes are
+  // written once. Writing before the row keeps the DB from ever pointing at a
+  // missing file.
+  const storagePath = join(config.ORIGINALS_DIR, `${contentHash}${type.ext}`);
+  if (!existsSync(storagePath)) writeFileSync(storagePath, input.bytes);
+
+  const info = db
+    .prepare(
+      `INSERT INTO asset (library_id, uploader_id, filename, mime_type,
+         byte_size, content_hash, capture_date, capture_source, storage_path,
+         thumbnail, thumbnail_mime, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      input.libraryId,
+      input.uploaderId,
+      submittedName ?? `upload${type.ext}`,
+      type.mime,
+      input.bytes.length,
+      contentHash,
+      captureDate,
+      captureSource,
+      storagePath,
+      thumbnail.data,
+      thumbnail.mime,
+      Date.now(),
+    );
+
+  return db
+    .prepare(`SELECT ${ASSET_COLUMNS} FROM asset WHERE id = ?`)
+    .get(Number(info.lastInsertRowid)) as unknown as AssetRow;
+}
+
 /**
  * Build the Assets API: Upload a photo into a Library, list a Library's Assets
  * as a grid, and download an Asset's thumbnail or untouched original. Every
@@ -92,8 +184,6 @@ function describeFile(name: string | null): string {
  * nobody can upload into or read another Member's private Library (ADR 0003).
  */
 export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
-  const now = () => Date.now();
-
   /** Resolve the current Member or throw 401. */
   const requireMember = (ctx: Ctx) => {
     const member = auth.currentMember(ctx.cookies);
@@ -143,70 +233,13 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
       }
 
       const bytes = await readRawBody(ctx.req, config.UPLOAD_MAX_BYTES);
-      const submittedName = clientFilename(ctx);
-      const type = detectImageType(bytes);
-      if (!type) {
-        throw new HttpError(
-          415,
-          "unsupported_type",
-          `${describeFile(submittedName)} is not a supported image. ` +
-            `Supported formats are ${SUPPORTED_FORMATS}.`,
-        );
-      }
-
-      const contentHash = createHash("sha256").update(bytes).digest("hex");
-
-      // Capture date: the file's own metadata wins; otherwise the file date the
-      // client sent; otherwise the moment of upload. Never fail for want of a
-      // date — the Timeline must still place every Asset.
-      let captureDate = readCaptureDate(bytes);
-      let captureSource: "exif" | "file" = "exif";
-      if (captureDate === null) {
-        captureSource = "file";
-        captureDate = fileDateHeader(ctx) ?? now();
-      }
-
-      let thumbnail: Thumbnail;
-      try {
-        thumbnail = await makeThumbnail(bytes);
-      } catch {
-        throw new HttpError(
-          415,
-          "corrupt_image",
-          `Could not generate a preview for ${describeFile(submittedName)}; ` +
-            "the file appears to be corrupt or incomplete.",
-        );
-      }
-
-      // Store the original untouched, content-addressed so identical bytes are
-      // written once. Writing before the row keeps the DB from ever pointing at
-      // a missing file.
-      const storagePath = join(config.ORIGINALS_DIR, `${contentHash}${type.ext}`);
-      if (!existsSync(storagePath)) writeFileSync(storagePath, bytes);
-
-      const info = db
-        .prepare(
-          `INSERT INTO asset (library_id, uploader_id, filename, mime_type,
-             byte_size, content_hash, capture_date, capture_source, storage_path,
-             thumbnail, thumbnail_mime, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          libraryId,
-          member.id,
-          submittedName ?? `upload${type.ext}`,
-          type.mime,
-          bytes.length,
-          contentHash,
-          captureDate,
-          captureSource,
-          storagePath,
-          thumbnail.data,
-          thumbnail.mime,
-          now(),
-        );
-
-      const asset = accessibleAsset(Number(info.lastInsertRowid), member.id);
+      const asset = await ingestAsset(db, config, {
+        libraryId,
+        uploaderId: member.id,
+        bytes,
+        filename: clientFilename(ctx),
+        fileDateMs: fileDateHeader(ctx),
+      });
       sendJson(ctx.res, 201, publicAsset(asset));
     },
 

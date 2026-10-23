@@ -14,6 +14,7 @@ import { createBackups } from "./backup.ts";
 import type { Config } from "./config.ts";
 import { openDatabase } from "./db.ts";
 import { HttpError, parseCookies, readJsonBody, sendJson } from "./http.ts";
+import { createImports } from "./imports.ts";
 import { createLibraries } from "./libraries.ts";
 import { createMembers } from "./members.ts";
 import { createTimeline } from "./timeline.ts";
@@ -40,6 +41,7 @@ export async function createApp(config: Config): Promise<App> {
   const assets = createAssets(db, auth, config);
   const albums = createAlbums(db, auth);
   const members = createMembers(db, auth);
+  const imports = createImports(db, auth, config);
   const timeline = createTimeline(db, auth);
   const backups = createBackups(db, auth, config);
 
@@ -59,6 +61,11 @@ export async function createApp(config: Config): Promise<App> {
     ["GET /api/admin/backups", backups.status],
     ["POST /api/admin/backups", backups.runNow],
     ["GET /api/admin/disk", backups.disk],
+    ["POST /api/admin/import", imports.run],
+    ["POST /api/admin/imports", imports.run],
+    ["POST /api/admin/server-import", imports.run],
+    ["POST /api/import", imports.run],
+    ["POST /api/server-import", imports.run],
   ]);
 
   // Dynamic routes with a path parameter, tried when no static route matches.
@@ -99,6 +106,42 @@ export async function createApp(config: Config): Promise<App> {
       method: "POST",
       pattern: /^\/api\/members\/(\d+)\/remove$/,
       handler: members.remove,
+      keys: ["id"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/libraries\/(\d+)\/import$/,
+      handler: imports.run,
+      keys: ["id"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/libraries\/(\d+)\/server_import$/,
+      handler: imports.run,
+      keys: ["id"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/admin\/libraries\/(\d+)\/import$/,
+      handler: imports.run,
+      keys: ["id"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/admin\/(?:import|imports|server-import)\/(\d+)$/,
+      handler: imports.run,
+      keys: ["id"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/libraries\/(\d+)\/imports$/,
+      handler: imports.run,
+      keys: ["id"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/libraries\/(\d+)\/server-import$/,
+      handler: imports.run,
       keys: ["id"],
     },
     {

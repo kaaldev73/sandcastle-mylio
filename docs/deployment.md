@@ -25,6 +25,7 @@ message naming every problem (see `src/config.ts`, the single source of truth).
 | `LOGIN_MAX_FAILURES` | no | `5` | Failed logins allowed per email within the window before blocking. |
 | `LOGIN_WINDOW_SECONDS` | no | `900` (15 min) | Sliding window for counting login failures. |
 | `UPLOAD_MAX_BYTES` | no | `52428800` (50 MB) | Largest single Upload accepted. |
+| `SERVER_IMPORT_DIR` | no | — | Folder on the server that Admins can import from. Unset disables Server Import. Mount the archive somewhere inside the container and point this at it. |
 | `BACKUP_S3_ENDPOINT` | no | — | S3-compatible endpoint for off-box backups. Set all four `BACKUP_S3_*` target/credential variables together, or none. |
 | `BACKUP_S3_BUCKET` | no | — | Bucket that receives the database snapshot and originals. |
 | `BACKUP_S3_ACCESS_KEY_ID` | no | — | S3 access key id. Keep it in the environment, never in the repository. |
@@ -70,6 +71,27 @@ target/credential variables.
   migration step is needed.
 - **Local volume.** The `/data` volume holds all the state; off-box backups
   copy it somewhere else so a lost disk is recoverable.
+
+## Server Import
+
+An Admin can bring an existing archive into a Library from a folder on the
+server. Set `SERVER_IMPORT_DIR` to that folder (for example a mounted
+`/imports`) and restart; the folder and its subfolders are read recursively.
+Only an Admin can start an import. Choose the target Library explicitly, for
+example:
+
+- `POST /api/libraries/:id/import` (the Library id is in the path), or
+- `POST /api/admin/import` with `{"libraryId": 1}` in the body.
+
+The optional `path`/`folder` body field selects a subfolder inside
+`SERVER_IMPORT_DIR`; it cannot escape that folder. Originals are copied
+byte-for-byte into `ORIGINALS_DIR` (the source files are left untouched) and
+dates are read from the file, falling back to its file date. Re-running the
+same import skips files already imported into that Library. Files that are not
+supported images are listed in the response (with the successful imports)
+instead of aborting the run. The response includes counts (`imported`,
+`skipped`, `unsupported`, `failed`), the imported Assets, and per-file detail
+lists (`skippedFiles`, `unsupportedFiles`, `failedFiles`).
 
 ## Backups, restore and disk usage
 

@@ -208,6 +208,29 @@ export const migrations: readonly Migration[] = [
       `);
     },
   },
+  {
+    id: "0009-server-import",
+    up(db) {
+      // Record which source files a Server Import has already brought into a
+      // Library, so re-running the same folder skips them instead of making
+      // duplicate Assets. The path is relative to the configured import folder
+      // and uses forward slashes, so it is stable across platforms. Deleting an
+      // Asset cascades its record away, allowing a deliberate re-import.
+      db.exec(`
+        CREATE TABLE server_import_file (
+          id           INTEGER PRIMARY KEY,
+          library_id   INTEGER NOT NULL REFERENCES library(id) ON DELETE CASCADE,
+          source_path  TEXT NOT NULL,
+          content_hash TEXT NOT NULL,
+          asset_id     INTEGER NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
+          imported_at  INTEGER NOT NULL,
+          UNIQUE (library_id, source_path)
+        );
+        CREATE INDEX idx_server_import_file_library
+          ON server_import_file (library_id);
+      `);
+    },
+  },
 ];
 
 /**

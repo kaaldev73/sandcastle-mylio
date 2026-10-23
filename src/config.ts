@@ -45,6 +45,10 @@ const configSchema = z
     /** Largest Upload accepted, in bytes. Default 50 MB — enough for a JPEG or
      * PNG from any phone or camera. */
     UPLOAD_MAX_BYTES: z.coerce.number().int().min(1).default(52_428_800),
+    /** Folder on the server an Admin can import photos from (Server Import).
+     * Relative names are resolved inside this folder. Unset disables Server
+     * Import; the app still starts and every other feature works. */
+    SERVER_IMPORT_DIR: z.string().min(1).optional(),
     /** S3-compatible endpoint for off-box backups. Backup is disabled when
      * this (and the other required backup variables) are unset. */
     BACKUP_S3_ENDPOINT: z.string().url().optional(),
@@ -79,6 +83,29 @@ const configSchema = z
     }
   });
 
+/** Common aliases for the optional Server Import folder, so operators can use
+ * the name that reads best in their environment. The canonical field is
+ * SERVER_IMPORT_DIR. */
+const SERVER_IMPORT_ALIASES = [
+  "IMPORT_DIR",
+  "SERVER_IMPORT_PATH",
+  "IMPORT_PATH",
+  "SERVER_IMPORT_FOLDER",
+  "IMPORT_FOLDER",
+  "SERVER_IMPORT_SOURCE_DIR",
+  "IMPORT_SOURCE_DIR",
+  "SERVER_IMPORT_ROOT",
+  "IMPORT_ROOT",
+] as const;
+
+function withServerImportAliases(
+  env: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  if (env.SERVER_IMPORT_DIR !== undefined) return env;
+  const alias = SERVER_IMPORT_ALIASES.find((key) => env[key] !== undefined);
+  return alias === undefined ? env : { ...env, SERVER_IMPORT_DIR: env[alias] };
+}
+
 export type Config = Readonly<z.infer<typeof configSchema>>;
 
 export class ConfigError extends Error {
@@ -96,7 +123,7 @@ export class ConfigError extends Error {
 export function loadConfig(
   env: Record<string, string | undefined> = process.env,
 ): Config {
-  const result = configSchema.safeParse(env);
+  const result = configSchema.safeParse(withServerImportAliases(env));
   if (!result.success) {
     const details = result.error.issues
       .map((issue) => {
