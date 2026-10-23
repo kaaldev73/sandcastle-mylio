@@ -1,7 +1,7 @@
 // Sequential Planner with Review — multi-phase orchestration loop
 //
 // This template drives a multi-phase workflow:
-//   Phase 1 (Plan):             An OpenCode agent analyzes open issues, builds a
+//   Phase 1 (Plan):             An opus agent analyzes open issues, builds a
 //                               dependency graph, and outputs a <plan> JSON
 //                               listing unblocked issues with branch names.
 //   Phase 2 (Execute + Review): For each issue, a sandbox is created via
@@ -44,9 +44,6 @@ const planSchema = z.object({
 // Raise this if your backlog is large; lower it for a quick smoke-test run.
 const MAX_ITERATIONS = 10;
 
-// Override on the host: OPENCODE_MODEL=provider/model npm run sandcastle
-const model = process.env.OPENCODE_MODEL?.trim() || "opencode/big-pickle";
-
 // Hooks run inside the sandbox before the agent starts each iteration.
 // npm install ensures the sandbox always has fresh dependencies.
 const hooks = {
@@ -81,7 +78,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     // One iteration is enough: the planner just needs to read and reason,
     // not write code. (Structured output requires maxIterations: 1.)
     maxIterations: 1,
-    agent: sandcastle.opencode(model),
+    agent: sandcastle.claudeCode("claude-opus-4-8"),
     promptFile: "./.sandcastle/plan-prompt.md",
     // Extract and validate the <plan> JSON into a typed object. Throws
     // StructuredOutputError if the tag is missing, the JSON is malformed, or
@@ -89,7 +86,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     output: sandcastle.Output.object({ tag: "plan", schema: planSchema }),
   });
 
-  const issues = planSchema.parse(plan.output).issues;
+  const issues = plan.output.issues;
 
   if (issues.length === 0) {
     // No unblocked work — either everything is done or everything is blocked.
@@ -127,7 +124,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
       const implement = await sandbox.run({
         name: "implementer",
         maxIterations: 100,
-        agent: sandcastle.opencode(model),
+        agent: sandcastle.claudeCode("claude-opus-4-8"),
         promptFile: "./.sandcastle/implement-prompt.md",
         promptArgs: {
           TASK_ID: issue.id,
@@ -141,7 +138,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         const review = await sandbox.run({
           name: "reviewer",
           maxIterations: 1,
-          agent: sandcastle.opencode(model),
+          agent: sandcastle.claudeCode("claude-opus-4-8"),
           promptFile: "./.sandcastle/review-prompt.md",
           promptArgs: {
             BRANCH: issue.branch,
@@ -178,7 +175,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
       sandbox: docker(),
       name: "merger",
       maxIterations: 1,
-      agent: sandcastle.opencode(model),
+      agent: sandcastle.claudeCode("claude-opus-4-8"),
       promptFile: "./.sandcastle/merge-prompt.md",
       promptArgs: {
         // A markdown list of branch names, one per line.
