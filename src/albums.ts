@@ -11,6 +11,10 @@ interface AlbumRow {
   name: string;
 }
 
+interface AlbumListRow extends AlbumRow {
+  asset_count: number;
+}
+
 /** Summary shape of an Album for listings; its Library id is safe to expose. */
 function publicAlbum(a: AlbumRow, assetCount: number): Record<string, unknown> {
   return {
@@ -60,24 +64,17 @@ export function createAlbums(db: DatabaseSync, auth: Auth) {
   /** Read an Asset id from the body, accepting a JSON number or numeric string. */
   const requireAssetId = (body: Record<string, unknown>): number => {
     const raw = body.assetId;
-    const id =
-      typeof raw === "number"
-        ? raw
-        : typeof raw === "string" && raw.trim() !== ""
-          ? Number(raw)
-          : NaN;
+    let id = NaN;
+    if (typeof raw === "number") {
+      id = raw;
+    } else if (typeof raw === "string" && raw.trim() !== "") {
+      id = Number(raw);
+    }
     if (!Number.isInteger(id) || id <= 0) {
       throw new HttpError(400, "missing_assetId");
     }
     return id;
   };
-
-  const assetCountOf = (albumId: number): number =>
-    (
-      db
-        .prepare("SELECT COUNT(*) AS n FROM album_asset WHERE album_id = ?")
-        .get(albumId) as { n: number }
-    ).n;
 
   /** The Album with its Assets, ordered like the grid (newest capture first). */
   const albumWithAssets = (album: AlbumRow): Record<string, unknown> => {
@@ -119,11 +116,17 @@ export function createAlbums(db: DatabaseSync, auth: Auth) {
 
       const albums = db
         .prepare(
-          "SELECT id, library_id, name FROM album WHERE library_id = ? ORDER BY id",
+          `SELECT a.id, a.library_id, a.name,
+                  COUNT(aa.asset_id) AS asset_count
+           FROM album a
+           LEFT JOIN album_asset aa ON aa.album_id = a.id
+           WHERE a.library_id = ?
+           GROUP BY a.id
+           ORDER BY a.id`,
         )
-        .all(libraryId) as unknown as AlbumRow[];
+        .all(libraryId) as unknown as AlbumListRow[];
       sendJson(ctx.res, 200, {
-        albums: albums.map((a) => publicAlbum(a, assetCountOf(a.id))),
+        albums: albums.map((a) => publicAlbum(a, a.asset_count)),
       });
     },
 
@@ -165,8 +168,8 @@ export function createAlbums(db: DatabaseSync, auth: Auth) {
 
       const assetId = requireAssetId(ctx.body);
       const asset = db
-        .prepare("SELECT id FROM asset WHERE id = ? AND library_id = ?")
-        .get(assetId, album.library_id) as { id: number } | undefined;
+        .prepare("SELECT 1 FROM asset WHERE id = ? AND library_id = ?")
+        .get(assetId, album.library_id);
       if (!asset) throw new HttpError(404, "asset_not_found");
 
       db.prepare(
