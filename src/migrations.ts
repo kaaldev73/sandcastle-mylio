@@ -162,6 +162,25 @@ export const migrations: readonly Migration[] = [
       `);
     },
   },
+  {
+    id: "0006-backups",
+    up(db) {
+      // Each scheduled or manual backup is one row, so Admins can see the last
+      // run's time, outcome and size. Timestamps are epoch milliseconds; the
+      // schedule itself is in memory and configured by environment variable.
+      db.exec(`
+        CREATE TABLE backup_run (
+          id            INTEGER PRIMARY KEY,
+          started_at    INTEGER NOT NULL,
+          finished_at   INTEGER,
+          status        TEXT NOT NULL CHECK (status IN ('running', 'success', 'failure')),
+          error         TEXT,
+          object_count  INTEGER NOT NULL DEFAULT 0,
+          byte_size     INTEGER NOT NULL DEFAULT 0
+        );
+      `);
+    },
+  },
 ];
 
 /**
