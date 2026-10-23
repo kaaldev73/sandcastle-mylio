@@ -249,6 +249,22 @@ export const migrations: readonly Migration[] = [
       `);
     },
   },
+  {
+    id: "0011-asset-deletion",
+    up(db) {
+      // Deleting an Asset moves it to a recoverable state: the row and its
+      // original file stay put, but a non-NULL deleted_at hides it from the
+      // Timeline, grid, Albums and review queue. Restoring clears the timestamp
+      // so the Asset's Rating and Album memberships reappear untouched.
+      // Permanent removal is a separate step that deletes the row (cascading
+      // its memberships) and then unlinks the original if nothing else uses it.
+      db.exec(`
+        ALTER TABLE asset ADD COLUMN deleted_at INTEGER;
+        CREATE INDEX idx_asset_library_deleted
+          ON asset (library_id, deleted_at);
+      `);
+    },
+  },
 ];
 
 /**

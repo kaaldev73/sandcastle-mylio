@@ -36,12 +36,13 @@ export interface AssetRow {
   thumbnail_mime: string;
   flag: "unflagged" | "pick" | "reject";
   stars: number;
+  deleted_at: number | null;
 }
 
 /** Columns selected wherever an AssetRow is read, kept in sync in one place. */
 export const ASSET_COLUMNS = `id, library_id, filename, mime_type, byte_size, content_hash,
          capture_date, date_override, capture_source, storage_path, thumbnail, thumbnail_mime,
-         flag, stars`;
+         flag, stars, deleted_at`;
 
 /** The date an Asset sits at in the Timeline: a correction wins if present. */
 export function effectiveDate(a: AssetRow): number {
@@ -51,6 +52,7 @@ export function effectiveDate(a: AssetRow): number {
 /** Public, grid-ready shape of an Asset; storage details are never exposed. */
 export function publicAsset(a: AssetRow): Record<string, unknown> {
   const rejected = a.flag === "reject";
+  const deleted = a.deleted_at !== null;
   return {
     id: a.id,
     filename: a.filename,
@@ -66,6 +68,9 @@ export function publicAsset(a: AssetRow): Record<string, unknown> {
     pick: a.flag === "pick",
     rejected,
     dimmed: rejected,
+    deleted,
+    recoverable: deleted,
+    deletedAt: deleted ? new Date(a.deleted_at!).toISOString() : null,
     thumbnailUrl: `/api/assets/${a.id}/thumbnail`,
     originalUrl: `/api/assets/${a.id}/original`,
   };
@@ -273,6 +278,31 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
       const range = dateRangeFromQuery(url);
       const clauses = ["library_id = ?"];
       const params: (number | string)[] = [libraryId];
+
+      // Deleted Assets are recoverable and hidden by default. Clients may ask
+      // for only the deleted ones (deleted=true/only) or for both
+      // (includeDeleted=true or deleted=all); the trash route is simpler.
+      const deletedRaw = (
+        url.searchParams.get("deleted") ?? ""
+      ).trim().toLowerCase();
+      const includeRaw = (
+        url.searchParams.get("includeDeleted") ??
+        url.searchParams.get("include_deleted") ??
+        ""
+      ).trim().toLowerCase();
+      const truthy = (value: string): boolean =>
+        ["true", "yes", "1", "on"].includes(value);
+      const deletedOnly = ["only", "true", "yes", "1", "deleted"].includes(
+        deletedRaw,
+      );
+      const includeDeleted =
+        truthy(includeRaw) || ["all", "any", "*"].includes(deletedRaw);
+      if (deletedOnly) {
+        clauses.push("deleted_at IS NOT NULL");
+      } else if (!includeDeleted) {
+        clauses.push("deleted_at IS NULL");
+      }
+
       if (range.from !== null) {
         clauses.push("COALESCE(date_override, capture_date) >= ?");
         params.push(range.from);

@@ -37,7 +37,7 @@ interface ReviewScope {
 function scopeFrom(libraryId: number, url: URL): ReviewScope {
   const range = dateRangeFromQuery(url);
   const rating = ratingFilterFromQuery(url);
-  const clauses = ["library_id = ?", ...rating.clauses];
+  const clauses = ["library_id = ?", "deleted_at IS NULL", ...rating.clauses];
   const params: (string | number)[] = [libraryId, ...rating.params];
   if (range.from !== null) {
     clauses.push("COALESCE(date_override, capture_date) >= ?");

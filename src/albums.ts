@@ -81,7 +81,8 @@ export function createAlbums(db: DatabaseSync, auth: Auth) {
     const assets = db
       .prepare(
         `SELECT ${ASSET_COLUMNS} FROM asset
-         WHERE id IN (SELECT asset_id FROM album_asset WHERE album_id = ?)
+         WHERE deleted_at IS NULL
+           AND id IN (SELECT asset_id FROM album_asset WHERE album_id = ?)
          ORDER BY COALESCE(date_override, capture_date) DESC, id DESC`,
       )
       .all(album.id) as unknown as AssetRow[];
@@ -117,9 +118,11 @@ export function createAlbums(db: DatabaseSync, auth: Auth) {
       const albums = db
         .prepare(
           `SELECT a.id, a.library_id, a.name,
-                  COUNT(aa.asset_id) AS asset_count
+                  COUNT(CASE WHEN asset.deleted_at IS NULL THEN aa.asset_id END)
+                    AS asset_count
            FROM album a
            LEFT JOIN album_asset aa ON aa.album_id = a.id
+           LEFT JOIN asset ON asset.id = aa.asset_id
            WHERE a.library_id = ?
            GROUP BY a.id
            ORDER BY a.id`,
@@ -168,7 +171,9 @@ export function createAlbums(db: DatabaseSync, auth: Auth) {
 
       const assetId = requireAssetId(ctx.body);
       const asset = db
-        .prepare("SELECT 1 FROM asset WHERE id = ? AND library_id = ?")
+        .prepare(
+          "SELECT 1 FROM asset WHERE id = ? AND library_id = ? AND deleted_at IS NULL",
+        )
         .get(assetId, album.library_id);
       if (!asset) throw new HttpError(404, "asset_not_found");
 
