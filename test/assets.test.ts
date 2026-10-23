@@ -4,7 +4,17 @@ import { test } from "node:test";
 
 import sharp from "sharp";
 
-import { makeJpeg, makeJpegWithCaptureDate, makePng } from "./helpers/images.ts";
+import {
+  makeGif,
+  makeHeic,
+  makeHeif,
+  makeJpeg,
+  makeJpegWithCaptureDate,
+  makePng,
+  makeRaw,
+  makeTiff,
+  makeWebp,
+} from "./helpers/images.ts";
 import { startTestApp, sessionCookie, type TestApp } from "./helpers/harness.ts";
 
 const PASSWORD = "correct-horse-battery";
@@ -168,13 +178,84 @@ test("capture date falls back to the file date when the file carries none", asyn
   }
 });
 
-test("an unsupported file is rejected", async () => {
+const supportedFormats = [
+  { name: "WebP", make: makeWebp, mime: "image/webp", ext: "webp" },
+  { name: "GIF", make: makeGif, mime: "image/gif", ext: "gif" },
+  { name: "TIFF", make: makeTiff, mime: "image/tiff", ext: "tiff" },
+  { name: "HEIC", make: makeHeic, mime: "image/heic", ext: "heic" },
+  { name: "HEIF", make: makeHeif, mime: "image/heif", ext: "heif" },
+  { name: "RAW", make: makeRaw, mime: "image/tiff", ext: "kdc" },
+];
+
+for (const format of supportedFormats) {
+  test(`${format.name} uploads, shows a browser preview, and downloads unchanged`, async () => {
+    const app = await startTestApp();
+    try {
+      const cookie = await setupAdmin(app);
+      const lib = await privateLibrary(app, cookie);
+      const bytes = await format.make();
+
+      const res = await upload(app, cookie, lib.id, bytes, {
+        filename: `sample.${format.ext}`,
+      });
+      assert.equal(res.status, 201);
+      const asset = (await res.json()) as Asset;
+      assert.equal(asset.mimeType, format.mime);
+
+      // The preview is a real JPEG the browser can display.
+      const thumbRes = await app.fetch(asset.thumbnailUrl, { headers: { cookie } });
+      assert.equal(thumbRes.status, 200);
+      assert.match(thumbRes.headers.get("content-type") ?? "", /^image\//);
+      const thumb = Buffer.from(await thumbRes.arrayBuffer());
+      const meta = await sharp(thumb).metadata();
+      assert.equal(meta.format, "jpeg");
+      assert.ok((meta.width ?? 0) > 0 && (meta.height ?? 0) > 0);
+      assert.ok((meta.width ?? 0) <= 256 && (meta.height ?? 0) <= 256);
+
+      // The original comes back byte-for-byte as uploaded.
+      const dl = await app.fetch(asset.originalUrl, { headers: { cookie } });
+      assert.equal(dl.status, 200);
+      assert.ok(Buffer.from(await dl.arrayBuffer()).equals(bytes));
+    } finally {
+      await app.stop();
+    }
+  });
+}
+
+test("an unsupported file is rejected with a clear message", async () => {
   const app = await startTestApp();
   try {
     const cookie = await setupAdmin(app);
     const lib = await privateLibrary(app, cookie);
-    const res = await upload(app, cookie, lib.id, Buffer.from("this is not an image"));
+    const res = await upload(app, cookie, lib.id, Buffer.from("this is not an image"), {
+      filename: "notes.txt",
+    });
     assert.equal(res.status, 415);
+    const body = (await res.json()) as { error: string; message: string };
+    assert.equal(body.error, "unsupported_type");
+    assert.match(body.message, /notes\.txt/);
+    assert.match(body.message, /JPEG|supported/i);
+  } finally {
+    await app.stop();
+  }
+});
+
+test("a corrupt image is rejected with a clear per-file message", async () => {
+  const app = await startTestApp();
+  try {
+    const cookie = await setupAdmin(app);
+    const lib = await privateLibrary(app, cookie);
+    // Starts like a JPEG but carries no decodable image data.
+    const broken = Buffer.concat([
+      Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]),
+      Buffer.from("definitely not a jpeg"),
+    ]);
+    const res = await upload(app, cookie, lib.id, broken, { filename: "broken.jpg" });
+    assert.equal(res.status, 415);
+    const body = (await res.json()) as { error: string; message: string };
+    assert.equal(body.error, "corrupt_image");
+    assert.match(body.message, /broken\.jpg/);
+    assert.match(body.message, /corrupt|could not|preview/i);
   } finally {
     await app.stop();
   }

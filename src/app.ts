@@ -95,7 +95,13 @@ export async function createApp(config: Config): Promise<App> {
   const server: Server = createServer((req, res) => {
     void handle(req, res).catch((err) => {
       if (err instanceof HttpError) {
-        sendJson(res, err.status, { error: err.code });
+        // Include a human-readable message only for errors that carry one;
+        // machine-readable codes alone stay the default response shape.
+        const body =
+          err.message === err.code
+            ? { error: err.code }
+            : { error: err.code, message: err.message };
+        sendJson(res, err.status, body);
       } else {
         sendJson(res, 500, { error: "internal_error" });
       }

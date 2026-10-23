@@ -8,7 +8,11 @@ import type { Auth, Ctx } from "./auth.ts";
 import type { Config } from "./config.ts";
 import { readCaptureDate } from "./exif.ts";
 import { HttpError, readRawBody, sendJson } from "./http.ts";
-import { detectImageType, makeThumbnail } from "./images.ts";
+import {
+  detectImageType,
+  makeThumbnail,
+  type Thumbnail,
+} from "./images.ts";
 import { libraryAccessibleBy } from "./libraries.ts";
 
 interface AssetRow {
@@ -58,10 +62,24 @@ function fileDateHeader(ctx: Ctx): number | null {
   return Number.isFinite(ms) && ms > 0 ? ms : null;
 }
 
+/** Read the client-supplied original filename, or null when none was sent. */
+function clientFilename(ctx: Ctx): string | null {
+  const name = header(ctx, "x-filename")?.trim() ?? "";
+  return name !== "" ? name : null;
+}
+
 /** Read the client-supplied original filename, falling back to a safe default. */
 function filenameHeader(ctx: Ctx, ext: string): string {
-  const name = header(ctx, "x-filename")?.trim() ?? "";
-  return name !== "" ? name : `upload${ext}`;
+  return clientFilename(ctx) ?? `upload${ext}`;
+}
+
+/** Formats the Upload endpoint accepts, for a human-readable rejection. */
+const SUPPORTED_FORMATS =
+  "JPEG, PNG, GIF, WebP, TIFF, HEIC/HEIF and common RAW formats";
+
+/** Name a file in an error message without leaking anything or being vague. */
+function describeFile(name: string | null): string {
+  return name === null ? "this file" : `"${name}"`;
 }
 
 /**
@@ -107,8 +125,16 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
       }
 
       const bytes = await readRawBody(ctx.req, config.UPLOAD_MAX_BYTES);
+      const submittedName = clientFilename(ctx);
       const type = detectImageType(bytes);
-      if (!type) throw new HttpError(415, "unsupported_type");
+      if (!type) {
+        throw new HttpError(
+          415,
+          "unsupported_type",
+          `${describeFile(submittedName)} is not a supported image. ` +
+            `Supported formats are ${SUPPORTED_FORMATS}.`,
+        );
+      }
 
       const contentHash = createHash("sha256").update(bytes).digest("hex");
 
@@ -122,7 +148,17 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
         captureDate = fileDateHeader(ctx) ?? now();
       }
 
-      const thumbnail = await makeThumbnail(bytes);
+      let thumbnail: Thumbnail;
+      try {
+        thumbnail = await makeThumbnail(bytes);
+      } catch {
+        throw new HttpError(
+          415,
+          "corrupt_image",
+          `Could not generate a preview for ${describeFile(submittedName)}; ` +
+            "the file appears to be corrupt or incomplete.",
+        );
+      }
 
       // Store the original untouched, content-addressed so identical bytes are
       // written once. Writing before the row keeps the DB from ever pointing at
