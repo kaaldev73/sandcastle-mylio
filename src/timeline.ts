@@ -1,6 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
 
-import { ASSET_COLUMNS, effectiveDate, publicAsset, type AssetRow } from "./assets.ts";
+import {
+  ASSET_COLUMNS_LIGHT,
+  effectiveDate,
+  publicAsset,
+  type AssetRow,
+} from "./assets.ts";
 import type { Auth, Ctx } from "./auth.ts";
 import {
   dateRangeFromQuery,
@@ -14,6 +19,7 @@ import {
 } from "./dates.ts";
 import { HttpError, sendJson } from "./http.ts";
 import { libraryAccessibleBy } from "./libraries.ts";
+import { parsePaging, pageSlice } from "./paging.ts";
 import { ratingFilterFromQuery } from "./rating.ts";
 
 type Level = "decade" | "year" | "month" | "day";
@@ -205,6 +211,28 @@ interface PeriodBucket {
   assets: AssetRow[];
 }
 
+/** One Timeline period as the API returns it (`assets` at day level only). */
+interface PeriodView {
+  level: Level;
+  key: string;
+  period: string;
+  label: string;
+  start: string;
+  end: string;
+  startDate: string;
+  endDate: string;
+  from: string;
+  to: string;
+  count: number;
+  assetCount: number;
+  total: number;
+  cover: Record<string, unknown>;
+  coverAsset: Record<string, unknown>;
+  coverId: number;
+  coverAssetId: number;
+  assets?: Record<string, unknown>[];
+}
+
 /**
  * Build the Timeline API: a read view over one Library that drills from decade
  * to year to month to day, each period carrying its count and a cover Asset
@@ -267,12 +295,17 @@ export function createTimeline(db: DatabaseSync, auth: Auth) {
     clauses.push(...rating.clauses);
     queryParams.push(...rating.params);
 
+    // Enumeration only: rows come back without their preview blobs — a sweep
+    // across thousands of Assets must not drag every thumbnail out of SQLite.
+    // Nothing shown in a Timeline needs the bytes; previews load per-Asset.
     const assets = db
       .prepare(
-        `SELECT ${ASSET_COLUMNS} FROM asset WHERE ${clauses.join(" AND ")}
+        `SELECT ${ASSET_COLUMNS_LIGHT} FROM asset WHERE ${clauses.join(" AND ")}
          ORDER BY COALESCE(date_override, capture_date) DESC, id DESC`,
       )
       .all(...queryParams) as unknown as AssetRow[];
+
+    const paging = parsePaging(url.searchParams);
 
     const buckets = new Map<string, PeriodBucket>();
     for (const asset of assets) {
@@ -286,44 +319,77 @@ export function createTimeline(db: DatabaseSync, auth: Auth) {
     }
 
     const order = url.searchParams.get("order") === "asc" ? 1 : -1;
-    const periods = [...buckets.values()]
-      .sort((a, b) => (a.period.start - b.period.start) * order)
-      .map(({ period, assets: inPeriod }) => {
-        const cover = publicAsset(inPeriod[0]);
-        return {
-          level,
-          key: period.key,
-          period: period.key,
-          label: period.label,
-          start: new Date(period.start).toISOString(),
-          end: new Date(period.end).toISOString(),
-          startDate: new Date(period.start).toISOString(),
-          endDate: new Date(period.end).toISOString(),
-          from: new Date(period.start).toISOString(),
-          to: new Date(period.end).toISOString(),
-          count: inPeriod.length,
-          assetCount: inPeriod.length,
-          cover,
-          coverAsset: cover,
-          coverId: inPeriod[0].id,
-          coverAssetId: inPeriod[0].id,
-          ...(level === "day"
-            ? { assets: inPeriod.map(publicAsset) }
-            : {}),
-        };
-      });
 
     // A whole-day drill-down is also useful as a flat Asset list; include the
     // matching Assets at the top level for clients that render a day directly.
-    const dayAssets =
-      level === "day" ? assets.map(publicAsset) : undefined;
+    // At day level a page windows that flat list, and each day then shows the
+    // Assets of the day that fall in the page.
+    const daySequence =
+      level === "day" && paging.requested
+        ? pageSlice(assets, paging)
+        : assets;
+    const dayWindowIds = new Set(daySequence.map((asset) => asset.id));
+
+    const allPeriods: PeriodView[] = [];
+    for (const bucket of [...buckets.values()].sort(
+      (a, b) => (a.period.start - b.period.start) * order,
+    )) {
+      const { period, assets: inPeriod } = bucket;
+      const visible =
+        level === "day" && paging.requested
+          ? inPeriod.filter((asset) => dayWindowIds.has(asset.id))
+          : inPeriod;
+      if (visible.length === 0) continue;
+      const startIso = new Date(period.start).toISOString();
+      const endIso = new Date(period.end).toISOString();
+      const cover = publicAsset(visible[0]);
+      allPeriods.push({
+        level,
+        key: period.key,
+        period: period.key,
+        label: period.label,
+        start: startIso,
+        end: endIso,
+        startDate: startIso,
+        endDate: endIso,
+        from: startIso,
+        to: endIso,
+        count: visible.length,
+        assetCount: visible.length,
+        total: inPeriod.length,
+        cover,
+        coverAsset: cover,
+        coverId: visible[0].id,
+        coverAssetId: visible[0].id,
+        ...(level === "day" ? { assets: visible.map(publicAsset) } : {}),
+      });
+    }
+
+    // At period levels a page windows the periods themselves; at day level it
+    // has already windowed the Asset list they hold.
+    const responsePeriods =
+      paging.requested && level !== "day"
+        ? pageSlice(allPeriods, paging)
+        : allPeriods;
+    const primaryCount =
+      level === "day" ? daySequence.length : responsePeriods.length;
+    const primaryTotal = level === "day" ? assets.length : allPeriods.length;
+    const morePages = paging.offset + primaryCount < primaryTotal;
+
+    const dayAssets = level === "day" ? daySequence.map(publicAsset) : undefined;
 
     sendJson(ctx.res, 200, {
       level,
       total: assets.length,
       assetCount: assets.length,
-      periods,
-      items: periods,
+      periodCount: buckets.size,
+      periods: responsePeriods,
+      items: responsePeriods,
+      limit: paging.limit,
+      offset: paging.offset,
+      count: primaryCount,
+      hasMore: morePages,
+      nextOffset: morePages ? paging.offset + primaryCount : null,
       ...(dayAssets === undefined ? {} : { assets: dayAssets }),
     });
   };
