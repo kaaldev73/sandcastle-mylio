@@ -8,7 +8,7 @@ import type { Auth, Ctx } from "./auth.ts";
 import type { Config } from "./config.ts";
 import { dateRangeFromQuery, requireDate } from "./dates.ts";
 import { readCaptureDate } from "./exif.ts";
-import { HttpError, readRawBody, sendJson } from "./http.ts";
+import { HttpError, readJsonBody, readRawBody, sendJson } from "./http.ts";
 import {
   detectImageType,
   makeThumbnail,
@@ -42,6 +42,11 @@ export interface AssetRow {
 export const ASSET_COLUMNS = `id, library_id, filename, mime_type, byte_size, content_hash,
          capture_date, date_override, capture_source, storage_path, thumbnail, thumbnail_mime,
          flag, stars`;
+
+/** ASSET_COLUMNS prefixed for use in a join against an asset table aliased `a`. */
+const JOINED_ASSET_COLUMNS = ASSET_COLUMNS.split(",")
+  .map((c) => `a.${c.trim()}`)
+  .join(", ");
 
 /** The date an Asset sits at in the Timeline: a correction wins if present. */
 export function effectiveDate(a: AssetRow): number {
@@ -91,9 +96,25 @@ function clientFilename(ctx: Ctx): string | null {
   return name !== "" ? name : null;
 }
 
+/**
+ * Read the client's upload key, the handle that makes an Upload resumable:
+ * a retry (or the client of an interrupted batch) sends the same key and gets
+ * the Asset its earlier attempt already saved, with nothing doubled. Accepted
+ * under X-Upload-Key or X-Upload-Id; absent means the keyless flow.
+ */
+function uploadKeyHeader(ctx: Ctx): string | null {
+  const raw = header(ctx, "x-upload-key") ?? header(ctx, "x-upload-id");
+  const key = raw?.trim() ?? "";
+  return key !== "" ? key : null;
+}
+
 /** Formats the Upload endpoint accepts, for a human-readable rejection. */
 const SUPPORTED_FORMATS =
   "JPEG, PNG, GIF, WebP, TIFF, HEIC/HEIF and common RAW formats";
+
+/** Most files one batch Upload action may carry; larger sets send more than
+ * one batch, each file still resumable through its own upload key. */
+const BATCH_MAX_FILES = 100;
 
 /** Describe a submitted file in an error, or fall back to a neutral phrase. */
 function describeFile(name: string | null): string {
@@ -192,6 +213,27 @@ export async function ingestAsset(
     .get(Number(info.lastInsertRowid)) as unknown as AssetRow;
 }
 
+/** A trimmed, non-empty string field on a batch entry, or null. */
+function optionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+}
+
+/** A positive epoch-ms number field on a batch entry, or null. */
+function optionalEpochMs(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : null;
+}
+
+/** One file's outcome within a batch Upload response. */
+interface BatchResult {
+  filename: string | null;
+  status: "uploaded" | "duplicate" | "failed";
+  asset?: Record<string, unknown>;
+  error?: string;
+  message?: string;
+}
+
 /**
  * Build the Assets API: Upload a photo into a Library, list a Library's Assets
  * as a grid, and download an Asset's thumbnail or untouched original. Every
@@ -199,6 +241,8 @@ export async function ingestAsset(
  * nobody can upload into or read another Member's private Library (ADR 0003).
  */
 export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
+  const now = () => Date.now();
+
   /** Resolve the current Member or throw 401. */
   const requireMember = (ctx: Ctx) => {
     const member = auth.currentMember(ctx.cookies);
@@ -215,6 +259,94 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
       throw new HttpError(404, "asset_not_found");
     }
     return asset;
+  };
+
+  /** A Library the Member may access, or throw 404 (never revealing why). */
+  const requireLibrary = (libraryId: number, memberId: number): void => {
+    if (!libraryAccessibleBy(db, libraryId, memberId)) {
+      throw new HttpError(404, "library_not_found");
+    }
+  };
+
+  /** Record an upload key → Asset binding, so a retry resolves to the same
+   * Asset. Only the first outcome for a key is kept (INSERT OR IGNORE): a
+   * resumed Upload keeps its original result even if the retry differs. */
+  const rememberSession = (
+    libraryId: number,
+    uploaderId: number,
+    uploadKey: string | null,
+    assetId: number,
+  ): void => {
+    if (!uploadKey) return;
+    db.prepare(
+      `INSERT OR IGNORE INTO upload_session
+         (library_id, uploader_id, upload_key, asset_id, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(libraryId, uploaderId, uploadKey, assetId, now());
+  };
+
+  /**
+   * Store one file into a Library — the core of both the single Upload and the
+   * batch action. Idempotent twice over: an upload key already bound to an
+   * Asset returns that Asset untouched, and bytes already present in the
+   * Library (matched by content hash) return the existing Asset rather than
+   * saving a second one (PRD Upload: no half-saved or doubled Assets). The
+   * Asset is resolved fully — original stored, thumbnail made, row inserted —
+   * before any caller learns of it.
+   */
+  const storeAsset = async (
+    member: { id: number },
+    libraryId: number,
+    input: {
+      bytes: Buffer;
+      filename: string | null;
+      modifiedMs: number | null;
+      uploadKey: string | null;
+    },
+  ): Promise<{ created: boolean; asset: AssetRow }> => {
+    // 1. Resume: a key we already served hands back its Asset as-is. The
+    // lookup is scoped to the Library and uploader, so a key never crosses
+    // either boundary.
+    if (input.uploadKey) {
+      const prior = db
+        .prepare(
+          `SELECT ${JOINED_ASSET_COLUMNS}
+             FROM upload_session us
+             JOIN asset a ON a.id = us.asset_id
+            WHERE us.library_id = ? AND us.uploader_id = ? AND us.upload_key = ?`,
+        )
+        .get(libraryId, member.id, input.uploadKey) as AssetRow | undefined;
+      if (prior) {
+        return { created: false, asset: prior };
+      }
+    }
+
+    // 2. Idempotence without a key: identical bytes in the same Library are
+    // the same Asset. Returning the existing row keeps the grid free of
+    // doubles (PRD Upload: no half-saved or doubled Assets).
+    const contentHash = createHash("sha256").update(input.bytes).digest("hex");
+    const existing = db
+      .prepare(
+        `SELECT ${ASSET_COLUMNS} FROM asset
+          WHERE library_id = ? AND content_hash = ? ORDER BY id LIMIT 1`,
+      )
+      .get(libraryId, contentHash) as AssetRow | undefined;
+    if (existing) {
+      rememberSession(libraryId, member.id, input.uploadKey, existing.id);
+      return { created: false, asset: existing };
+    }
+
+    // 3. New file: the shared ingestion path keeps browser Upload and Server
+    // Import in agreement (original stored, thumbnail made, row inserted).
+    const asset = await ingestAsset(db, config, {
+      libraryId,
+      uploaderId: member.id,
+      bytes: input.bytes,
+      filename: input.filename,
+      fileDateMs: input.modifiedMs,
+    });
+    rememberSession(libraryId, member.id, input.uploadKey, asset.id);
+    return { created: true, asset };
   };
 
   /** Apply a date correction shared by the two PATCH route aliases. */
@@ -235,27 +367,113 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
   return {
     /**
      * POST /api/libraries/:id/assets — Upload a photo. The request body is the
-     * raw image bytes; the original filename and the file's own date ride in
-     * the X-Filename and X-File-Modified-Ms headers. The original is stored
-     * byte-for-byte, its content hash recorded, a thumbnail generated, and the
-     * capture date read from the file (EXIF), falling back to the file date.
+     * raw image bytes; the original filename, the file's own date and the
+     * resumable upload key ride in the X-Filename, X-File-Modified-Ms and
+     * X-Upload-Key headers. The original is stored byte-for-byte, its content
+     * hash recorded, a thumbnail generated, and the capture date read from the
+     * file (EXIF), falling back to the file date. Retrying with the same key,
+     * or re-uploading identical bytes, returns the existing Asset instead of a
+     * double; a fresh upload answers 201, a repeat 200.
      */
     async upload(ctx: Ctx): Promise<void> {
       const member = requireMember(ctx);
       const libraryId = Number(ctx.params.id);
-      if (!libraryAccessibleBy(db, libraryId, member.id)) {
-        throw new HttpError(404, "library_not_found");
-      }
+      requireLibrary(libraryId, member.id);
 
       const bytes = await readRawBody(ctx.req, config.UPLOAD_MAX_BYTES);
-      const asset = await ingestAsset(db, config, {
-        libraryId,
-        uploaderId: member.id,
+      const stored = await storeAsset(member, libraryId, {
         bytes,
         filename: clientFilename(ctx),
-        fileDateMs: fileDateHeader(ctx),
+        modifiedMs: fileDateHeader(ctx),
+        uploadKey: uploadKeyHeader(ctx),
       });
-      sendJson(ctx.res, 201, publicAsset(asset));
+      sendJson(ctx.res, stored.created ? 201 : 200, publicAsset(stored.asset));
+    },
+
+    /**
+     * POST /api/libraries/:id/assets/batch — Bulk Upload: many files in one
+     * action with a per-file status, so a Member adding a whole holiday at
+     * once sees exactly what made it in (PRD Upload). The JSON body carries
+     * the files as base64; each is stored independently — a failure is
+     * reported for that file alone and never aborts the rest. Files may carry
+     * an upload key, so an interrupted batch can be rerun as-is: files that
+     * already landed return their existing Assets (as "duplicate") and the
+     * failed ones are simply retried.
+     */
+    async uploadBatch(ctx: Ctx): Promise<void> {
+      const member = requireMember(ctx);
+      const libraryId = Number(ctx.params.id);
+      requireLibrary(libraryId, member.id);
+
+      // Raw route: the body is parsed and size-capped here so one request can
+      // carry a whole batch rather than a single upload's worth of bytes.
+      const batchBodyLimit = config.UPLOAD_MAX_BYTES * 8;
+      const body = await readJsonBody(ctx.req, batchBodyLimit);
+      const files = body.files;
+      if (!Array.isArray(files) || files.length === 0) {
+        throw new HttpError(
+          400,
+          "invalid_batch",
+          "Provide a non-empty 'files' array of { filename, modifiedMs, uploadKey, contentBase64 } entries.",
+        );
+      }
+      if (files.length > BATCH_MAX_FILES) {
+        throw new HttpError(
+          400,
+          "invalid_batch",
+          `A batch holds at most ${BATCH_MAX_FILES} files; send the rest in another batch.`,
+        );
+      }
+
+      const results: BatchResult[] = [];
+
+      for (const file of files as Record<string, unknown>[]) {
+        const filename = optionalString(file.filename);
+        const modifiedMs = optionalEpochMs(file.modifiedMs);
+        const uploadKey = optionalString(file.uploadKey);
+
+        try {
+          const decoded =
+            typeof file.contentBase64 === "string"
+              ? Buffer.from(file.contentBase64, "base64")
+              : Buffer.alloc(0);
+          if (decoded.length === 0) {
+            throw new HttpError(
+              415,
+              "bad_file",
+              `${describeFile(filename)} carried no decodable content.`,
+            );
+          }
+          if (decoded.length > config.UPLOAD_MAX_BYTES) {
+            throw new HttpError(413, "payload_too_large");
+          }
+
+          const stored = await storeAsset(member, libraryId, {
+            bytes: decoded,
+            filename,
+            modifiedMs,
+            uploadKey,
+          });
+          results.push({
+            filename,
+            status: stored.created ? "uploaded" : "duplicate",
+            asset: publicAsset(stored.asset),
+          });
+        } catch (err) {
+          // Per-file failure: report it and keep the batch going. Positive
+          // failures become their status/code; anything unexpected defaults
+          // to a plain internal error for that file only.
+          const http = err instanceof HttpError ? err : undefined;
+          results.push({
+            filename,
+            status: "failed",
+            error: http?.code ?? "internal_error",
+            message: http?.detail,
+          });
+        }
+      }
+
+      sendJson(ctx.res, 200, { results });
     },
 
     /**
@@ -266,9 +484,7 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
     list(ctx: Ctx): void {
       const member = requireMember(ctx);
       const libraryId = Number(ctx.params.id);
-      if (!libraryAccessibleBy(db, libraryId, member.id)) {
-        throw new HttpError(404, "library_not_found");
-      }
+      requireLibrary(libraryId, member.id);
       const url = new URL(ctx.req.url ?? "/", "http://familio.local");
       const range = dateRangeFromQuery(url);
       const clauses = ["library_id = ?"];

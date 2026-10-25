@@ -18,10 +18,16 @@ function fixture(name: string): Buffer {
   return readFileSync(join(FIXTURES, name));
 }
 
-/** A small solid-colour JPEG with no EXIF metadata. */
-export function makeJpeg(): Promise<Buffer> {
+/** A small solid-colour JPEG with no EXIF metadata. Pass a width override to
+ * make images with different bytes (e.g. when a test uploads several photos
+ * that must each be a distinct Asset; a colour tweak alone can quantize to
+ * the same JPEG bytes). */
+export function makeJpeg(
+  width = 120,
+  background = { r: 200, g: 60, b: 90 },
+): Promise<Buffer> {
   return sharp({
-    create: { width: 120, height: 80, channels: 3, background: { r: 200, g: 60, b: 90 } },
+    create: { width, height: 80, channels: 3, background },
   })
     .jpeg()
     .toBuffer();

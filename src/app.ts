@@ -64,10 +64,6 @@ export async function createApp(config: Config): Promise<App> {
     ["POST /api/admin/backups", backups.runNow],
     ["GET /api/admin/disk", backups.disk],
     ["POST /api/admin/import", imports.run],
-    ["POST /api/admin/imports", imports.run],
-    ["POST /api/admin/server-import", imports.run],
-    ["POST /api/import", imports.run],
-    ["POST /api/server-import", imports.run],
   ]);
 
   // Dynamic routes with a path parameter, tried when no static route matches.
@@ -204,6 +200,13 @@ export async function createApp(config: Config): Promise<App> {
       method: "POST",
       pattern: /^\/api\/libraries\/(\d+)\/assets$/,
       handler: assets.upload,
+      keys: ["id"],
+      raw: true,
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/libraries\/(\d+)\/assets\/batch$/,
+      handler: assets.uploadBatch,
       keys: ["id"],
       raw: true,
     },

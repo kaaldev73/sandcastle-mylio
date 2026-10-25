@@ -72,6 +72,12 @@ async function privateLibrary(app: TestApp, cookie: string): Promise<Library> {
   return (await libraries(app, cookie)).find((l) => l.kind === "private")!;
 }
 
+// Distinct bytes per call: an Upload is idempotent per Library (identical
+// bytes already there return the existing Asset), so tests that need several
+// Assets upload slightly different images (width differs; colours quantize
+// to the same JPEG too easily).
+let photoNum = 0;
+
 async function upload(
   app: TestApp,
   cookie: string,
@@ -86,7 +92,7 @@ async function upload(
   const res = await app.fetch(`/api/libraries/${libraryId}/assets`, {
     method: "POST",
     headers,
-    body: await makeJpeg(),
+    body: await makeJpeg(120 + (photoNum++ % 64)),
   });
   assert.equal(res.status, 201);
   return (await res.json()) as Asset;

@@ -249,6 +249,25 @@ export const migrations: readonly Migration[] = [
       `);
     },
   },
+  {
+    id: "0011-upload-sessions",
+    up(db) {
+      // An Upload is resumable and idempotent (PRD Upload): a client sending an
+      // upload key gets the Asset its earlier attempt produced, so a retried or
+      // interrupted Upload can never save half of or double an Asset. One row
+      // per (Library, uploader, key); written only after the Asset is complete.
+      db.exec(`
+        CREATE TABLE upload_session (
+          library_id  INTEGER NOT NULL REFERENCES library(id) ON DELETE CASCADE,
+          uploader_id INTEGER NOT NULL REFERENCES member(id) ON DELETE CASCADE,
+          upload_key  TEXT NOT NULL,
+          asset_id    INTEGER NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
+          created_at  INTEGER NOT NULL,
+          PRIMARY KEY (library_id, uploader_id, upload_key)
+        );
+      `);
+    },
+  },
 ];
 
 /**
