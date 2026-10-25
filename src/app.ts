@@ -109,6 +109,13 @@ export async function createApp(config: Config): Promise<App> {
       raw: true,
     },
     {
+      method: "POST",
+      pattern: /^\/api\/libraries\/(\d+)\/assets\/batch$/,
+      handler: assets.uploadBatch,
+      keys: ["id"],
+      raw: true,
+    },
+    {
       method: "GET",
       pattern: /^\/api\/libraries\/(\d+)\/assets$/,
       handler: assets.list,

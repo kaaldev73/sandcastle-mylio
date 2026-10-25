@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { makeJpegWithCaptureDate, makePng } from "./helpers/images.ts";
+import { makeJpegWithCaptureDate, makePng, makeWebp } from "./helpers/images.ts";
 import { startTestApp, sessionCookie, type TestApp } from "./helpers/harness.ts";
 
 const PASSWORD = "correct-horse-battery";
@@ -377,9 +377,10 @@ test("Assets with no EXIF date remain findable in the Timeline", async () => {
     assert.equal(datedByFile.captureSource, "file");
 
     // A photo with neither EXIF nor a client-supplied file date still lands
-    // in the Timeline at its Upload fallback date.
-    const undated = await upload(app, cookie, lib.id, await makePng(), {
-      filename: "mystery.png",
+    // in the Timeline at its Upload fallback date. Its bytes differ from the
+    // scan above — an Upload does not double them as one Asset (issue 8).
+    const undated = await upload(app, cookie, lib.id, await makeWebp(), {
+      filename: "scans.week",
     });
 
     const all = await timelineOk(app, cookie, lib.id, "level=year");
