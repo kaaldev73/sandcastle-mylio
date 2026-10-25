@@ -55,13 +55,10 @@ export async function createApp(config: Config): Promise<App> {
     ["POST /api/password-reset/request", auth.requestPasswordReset],
     ["POST /api/password-reset/confirm", auth.confirmPasswordReset],
     ["GET /api/libraries", libraries.list],
-<<<<<<< HEAD
+    ["GET /api/members", members.list],
     ["GET /api/admin/backups", backups.status],
     ["POST /api/admin/backups", backups.runNow],
     ["GET /api/admin/disk", backups.disk],
-=======
-    ["GET /api/members", members.list],
->>>>>>> sandcastle/issue-16
   ]);
 
   // Dynamic routes with a path parameter, tried when no static route matches.
