@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { ASSET_COLUMNS, effectiveDate, type AssetRow } from "./assets.ts";
 import { dateRangeFromQuery } from "./dates.ts";
+import { placeFilterFromQuery } from "./place.ts";
 import { ratingFilterFromQuery } from "./rating.ts";
 
 /**
@@ -31,8 +32,13 @@ function ascendingFromQuery(url: URL): boolean {
 export function assetScope(libraryId: number, url: URL): AssetScope {
   const range = dateRangeFromQuery(url);
   const rating = ratingFilterFromQuery(url);
-  const clauses = ["library_id = ?", ...rating.clauses];
-  const params: (string | number)[] = [libraryId, ...rating.params];
+  const place = placeFilterFromQuery(url);
+  const clauses = ["library_id = ?", ...rating.clauses, ...place.clauses];
+  const params: (string | number)[] = [
+    libraryId,
+    ...rating.params,
+    ...place.params,
+  ];
   if (range.from !== null) {
     clauses.push("COALESCE(date_override, capture_date) >= ?");
     params.push(range.from);

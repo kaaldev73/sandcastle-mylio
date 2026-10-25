@@ -20,6 +20,7 @@ import {
 import { HttpError, sendJson } from "./http.ts";
 import { libraryAccessibleBy } from "./libraries.ts";
 import { parsePaging, pageSlice } from "./paging.ts";
+import { placeFilterFromQuery } from "./place.ts";
 import { ratingFilterFromQuery } from "./rating.ts";
 
 type Level = "decade" | "year" | "month" | "day";
@@ -294,6 +295,9 @@ export function createTimeline(db: DatabaseSync, auth: Auth) {
     const rating = ratingFilterFromQuery(url);
     clauses.push(...rating.clauses);
     queryParams.push(...rating.params);
+    const place = placeFilterFromQuery(url);
+    clauses.push(...place.clauses);
+    queryParams.push(...place.params);
 
     // Enumeration only: rows come back without their preview blobs — a sweep
     // across thousands of Assets must not drag every thumbnail out of SQLite.

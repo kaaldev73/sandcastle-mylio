@@ -46,6 +46,123 @@ export function makeJpegWithCaptureDate(date: string): Promise<Buffer> {
     .toBuffer();
 }
 
+/**
+ * Split a decimal-degree value into the GPS degrees/minutes/seconds rationals
+ * (seconds recorded to 1/100 s), returning their magnitude; the sign travels
+ * in the hemisphere reference letter instead.
+ */
+function degreeRationals(value: number): [number, number][] {
+  const abs = Math.abs(value);
+  const degrees = Math.floor(abs);
+  const minutesFloat = (abs - degrees) * 60;
+  const minutes = Math.floor(minutesFloat);
+  const seconds = Math.round((minutesFloat - minutes) * 60 * 100) / 100;
+  return [
+    [degrees, 1],
+    [minutes, 1],
+    [seconds * 100, 100],
+  ];
+}
+
+/**
+ * Build a minimal EXIF TIFF block (little endian) whose IFD0 points at a GPS
+ * sub-IFD carrying a latitude/longitude. Written by hand rather than by
+ * sharp: libvips drops GPS/IFD3 keys when re-encoding EXIF. The layout is
+ * header → IFD0 (GPS pointer, one entry) → GPS IFD (ref/value entries) → the
+ * out-of-line RATIONAL values.
+ */
+function buildGpsExifTiff(latitude: number, longitude: number): Buffer {
+  const tiff = Buffer.alloc(140);
+  tiff.write("II", 0, "latin1");
+  tiff.writeUint16LE(42, 2);
+  tiff.writeUint32LE(8, 4); // IFD0 follows the header
+
+  // IFD0 at 8: one entry, pointing at the GPS sub-IFD.
+  tiff.writeUint16LE(1, 8);
+  tiff.writeUint16LE(0x8825, 10); // GPSInfo tag
+  tiff.writeUint16LE(4, 12); // LONG
+  tiff.writeUint32LE(1, 14);
+  tiff.writeUint32LE(26, 18); // GPS IFD offset
+  tiff.writeUint32LE(0, 22); // no next IFD
+
+  // GPS IFD at 26: reference and value entries for both coordinates.
+  tiff.writeUint16LE(4, 26);
+  tiff.writeUint32LE(0, 76); // no next IFD
+  const gpsEntry = (
+    i: number,
+    tag: number,
+    type: number,
+    count: number,
+    inline?: Buffer,
+    offset?: number,
+  ): void => {
+    const entry = 28 + i * 12;
+    tiff.writeUint16LE(tag, entry);
+    tiff.writeUint16LE(type, entry + 2);
+    tiff.writeUint32LE(count, entry + 4);
+    if (inline !== undefined) {
+      inline.copy(tiff, entry + 8); // left-justified in the 4-byte field
+    } else {
+      tiff.writeUint32LE(offset ?? 0, entry + 8);
+    }
+  };
+  const latRef = latitude >= 0 ? "N" : "S";
+  const lonRef = longitude >= 0 ? "E" : "W";
+
+  gpsEntry(0, 0x0001, 2, 2, Buffer.from(`${latRef}\0`, "latin1"));
+  gpsEntry(1, 0x0002, 5, 3, undefined, 80);
+  gpsEntry(2, 0x0003, 2, 2, Buffer.from(`${lonRef}\0`, "latin1"));
+  gpsEntry(3, 0x0004, 5, 3, undefined, 104);
+
+  // The out-of-line RATIONAL triples: first latitude at 80, longitude at 104.
+  const writeRationals = (offset: number, value: number): void => {
+    const parts = degreeRationals(value);
+    parts.forEach(([num, den], i) => {
+      tiff.writeUint32LE(num, offset + i * 8);
+      tiff.writeUint32LE(den, offset + i * 8 + 4);
+    });
+  };
+  writeRationals(80, latitude);
+  writeRationals(104, longitude);
+  return tiff;
+}
+
+/**
+ * Insert a marker segment (e.g. a hand-built EXIF APP1) after a JPEG's SOI,
+ * splicing its own APP1s behind it. JPEG tolerates several APP1 segments;
+ * mainstream writers put EXIF first.
+ */
+function spliceJpegSegment(jpeg: Buffer, segment: Buffer): Buffer {
+  const before = jpeg.subarray(0, 2); // SOI
+  const after = jpeg.subarray(2);
+  const header = Buffer.alloc(4);
+  header.writeUint8(0xff, 0);
+  header.writeUint8(0xe1, 1); // APP1
+  header.writeUint16BE(segment.length + 2, 2);
+  return Buffer.concat([before, header, segment, after]);
+}
+
+/**
+ * A small JPEG carrying EXIF GPS coordinates, as a camera or phone would
+ * produce for a geotagged photo. `latitude`/`longitude` are decimal degrees;
+ * negative values become S/W. sharp cannot produce this (see above), so the
+ * JPEG is generated first and a self-built APP1 EXIF segment with GPS IFD is
+ * spliced in.
+ */
+export function makeJpegWithGps(latitude: number, longitude: number): Promise<Buffer> {
+  return sharp({
+    create: { width: 100, height: 70, channels: 3, background: { r: 150, g: 100, b: 60 } },
+  })
+    .jpeg()
+    .toBuffer()
+    .then((jpeg) =>
+      spliceJpegSegment(
+        jpeg,
+        Buffer.concat([Buffer.from("Exif\0\0", "latin1"), buildGpsExifTiff(latitude, longitude)]),
+      ),
+    );
+}
+
 /** A small solid-colour PNG. */
 export function makePng(): Promise<Buffer> {
   return sharp({
