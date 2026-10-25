@@ -84,3 +84,13 @@ export function parsePaging(params: URLSearchParams): Paging {
   }
   return { limit, offset, requested: true };
 }
+
+/**
+ * The window of `list` this paging asks for: `limit` rows after `offset`, or
+ * with no limit everything from `offset` on. An unrequested page is a no-op
+ * (offset 0, no limit), so callers may apply it unconditionally.
+ */
+export function pageSlice<T>(list: readonly T[], paging: Paging): T[] {
+  if (paging.limit === null) return list.slice(paging.offset);
+  return list.slice(paging.offset, paging.offset + paging.limit);
+}

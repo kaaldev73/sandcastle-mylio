@@ -19,7 +19,7 @@ import {
 } from "./dates.ts";
 import { HttpError, sendJson } from "./http.ts";
 import { libraryAccessibleBy } from "./libraries.ts";
-import { parsePaging } from "./paging.ts";
+import { parsePaging, pageSlice } from "./paging.ts";
 import { ratingFilterFromQuery } from "./rating.ts";
 
 type Level = "decade" | "year" | "month" | "day";
@@ -326,9 +326,7 @@ export function createTimeline(db: DatabaseSync, auth: Auth) {
     // Assets of the day that fall in the page.
     const daySequence =
       level === "day" && paging.requested
-        ? paging.limit === null
-          ? assets.slice(paging.offset)
-          : assets.slice(paging.offset, paging.offset + paging.limit)
+        ? pageSlice(assets, paging)
         : assets;
     const dayWindowIds = new Set(daySequence.map((asset) => asset.id));
 
@@ -342,18 +340,20 @@ export function createTimeline(db: DatabaseSync, auth: Auth) {
           ? inPeriod.filter((asset) => dayWindowIds.has(asset.id))
           : inPeriod;
       if (visible.length === 0) continue;
+      const startIso = new Date(period.start).toISOString();
+      const endIso = new Date(period.end).toISOString();
       const cover = publicAsset(visible[0]);
       allPeriods.push({
         level,
         key: period.key,
         period: period.key,
         label: period.label,
-        start: new Date(period.start).toISOString(),
-        end: new Date(period.end).toISOString(),
-        startDate: new Date(period.start).toISOString(),
-        endDate: new Date(period.end).toISOString(),
-        from: new Date(period.start).toISOString(),
-        to: new Date(period.end).toISOString(),
+        start: startIso,
+        end: endIso,
+        startDate: startIso,
+        endDate: endIso,
+        from: startIso,
+        to: endIso,
         count: visible.length,
         assetCount: visible.length,
         total: inPeriod.length,
@@ -367,19 +367,15 @@ export function createTimeline(db: DatabaseSync, auth: Auth) {
 
     // At period levels a page windows the periods themselves; at day level it
     // has already windowed the Asset list they hold.
-    let responsePeriods = allPeriods;
-    if (paging.requested && level !== "day") {
-      responsePeriods =
-        paging.limit === null
-          ? allPeriods.slice(paging.offset)
-          : allPeriods.slice(paging.offset, paging.offset + paging.limit);
-    }
+    const responsePeriods =
+      paging.requested && level !== "day"
+        ? pageSlice(allPeriods, paging)
+        : allPeriods;
     const primaryCount =
       level === "day" ? daySequence.length : responsePeriods.length;
     const primaryTotal = level === "day" ? assets.length : allPeriods.length;
     const morePages = paging.offset + primaryCount < primaryTotal;
 
-    // A whole-day drill-down is also useful as a flat Asset list.
     const dayAssets = level === "day" ? daySequence.map(publicAsset) : undefined;
 
     sendJson(ctx.res, 200, {

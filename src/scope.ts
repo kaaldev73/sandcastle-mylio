@@ -50,10 +50,17 @@ export function scopeOrder(scope: AssetScope): string {
   return `ORDER BY COALESCE(date_override, capture_date) ${word}, id ${word}`;
 }
 
+/** The scope's filters as a WHERE-fragment (without the WHERE keyword). */
+export function scopeWhere(scope: AssetScope): string {
+  return scope.clauses.join(" AND ");
+}
+
 /** How many Assets a view shows. */
 export function assetsInScope(db: DatabaseSync, scope: AssetScope): number {
   const row = db
-    .prepare(`SELECT COUNT(*) AS n FROM asset WHERE ${scope.clauses.join(" AND ")}`)
+    .prepare(
+      `SELECT COUNT(*) AS n FROM asset WHERE ${scopeWhere(scope)}`,
+    )
     .get(...scope.params) as { n: number };
   return row.n;
 }
@@ -67,7 +74,7 @@ export function assetInScope(
   return (
     db
       .prepare(
-        `SELECT 1 FROM asset WHERE id = ? AND ${scope.clauses.join(" AND ")}`,
+        `SELECT 1 FROM asset WHERE id = ? AND ${scopeWhere(scope)}`,
       )
       .get(assetId, ...scope.params) !== undefined
   );
@@ -89,7 +96,7 @@ export function assetsBefore(
   const row = db
     .prepare(
       `SELECT COUNT(*) AS n FROM asset
-       WHERE ${scope.clauses.join(" AND ")} AND ${comparison}`,
+       WHERE ${scopeWhere(scope)} AND ${comparison}`,
     )
     .get(...scope.params, date, date, asset.id) as { n: number };
   return row.n;
@@ -117,7 +124,7 @@ export function neighbouringAsset(
   const row = db
     .prepare(
       `SELECT ${ASSET_COLUMNS} FROM asset
-       WHERE ${scope.clauses.join(" AND ")} AND ${comparison}
+       WHERE ${scopeWhere(scope)} AND ${comparison}
        ORDER BY COALESCE(date_override, capture_date) ${word}, id ${word}
        LIMIT 1`,
     )
@@ -134,7 +141,7 @@ export function firstAssetInScope(
   const row = db
     .prepare(
       `SELECT ${ASSET_COLUMNS} FROM asset
-       WHERE ${scope.clauses.join(" AND ")}
+       WHERE ${scopeWhere(scope)}
        ORDER BY COALESCE(date_override, capture_date) ${word}, id ${word}
        LIMIT 1`,
     )

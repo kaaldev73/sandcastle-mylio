@@ -21,12 +21,13 @@ import {
 } from "./rating.ts";
 import { parsePaging } from "./paging.ts";
 import {
-  assetScope,
   assetInScope,
+  assetScope,
   assetsBefore,
   assetsInScope,
   neighbouringAsset,
   scopeOrder,
+  scopeWhere,
 } from "./scope.ts";
 
 export interface AssetRow {
@@ -509,29 +510,26 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
       requireLibrary(libraryId, member.id);
       const url = new URL(ctx.req.url ?? "/", "http://familio.local");
       const scope = assetScope(libraryId, url);
-      const where = `WHERE ${scope.clauses.join(" AND ")}`;
+      const where = scopeWhere(scope);
       const paging = parsePaging(url.searchParams);
 
-      const limitSql =
-        paging.limit === null && paging.offset === 0
-          ? ""
-          : ` LIMIT ? OFFSET ?`;
-      const pagingParams: number[] =
-        limitSql === "" ? [] : [paging.limit ?? -1, paging.offset];
+      // A paged answer needs SQL LIMIT/OFFSET whenever a limit was asked for
+      // or the window starts past the first row; SQLite reads a negative
+      // LIMIT as "no limit", so an offset-only page skips without a cap.
+      const paged = paging.limit !== null || paging.offset > 0;
+      const limitSql = paged ? " LIMIT ? OFFSET ?" : "";
+      const pagingParams = paged ? [paging.limit ?? -1, paging.offset] : [];
 
       const rows = db
         .prepare(
-          `SELECT ${ASSET_COLUMNS_LIGHT} FROM asset ${where}
+          `SELECT ${ASSET_COLUMNS_LIGHT} FROM asset WHERE ${where}
            ${scopeOrder(scope)}${limitSql}`,
         )
         .all(...scope.params, ...pagingParams) as unknown as AssetRow[];
 
       // Only a paginated request pays for the total count; an unpaged answer
       // holds everything anyway.
-      const total =
-        paging.limit === null && paging.offset === 0
-          ? rows.length
-          : assetsInScope(db, scope);
+      const total = paged ? assetsInScope(db, scope) : rows.length;
       const morePages = paging.offset + rows.length < total;
 
       sendJson(ctx.res, 200, {
@@ -570,16 +568,18 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
       const scope = assetScope(asset.library_id, url);
       const previous = neighbouringAsset(db, scope, asset, "previous");
       const next = neighbouringAsset(db, scope, asset, "next");
+      const current = publicAsset(asset);
+      const total = assetsInScope(db, scope);
 
       sendJson(ctx.res, 200, {
-        asset: publicAsset(asset),
-        current: publicAsset(asset),
+        asset: current,
+        current,
         previous: previous === null ? null : publicAsset(previous),
         next: next === null ? null : publicAsset(next),
         position: assetInScope(db, scope, asset.id)
           ? assetsBefore(db, scope, asset) + 1
           : null,
-        total: assetsInScope(db, scope),
+        total,
         hasPrevious: previous !== null,
         hasNext: next !== null,
       });

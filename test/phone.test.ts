@@ -3,7 +3,6 @@ import { test } from "node:test";
 
 import { startTestApp, sessionCookie, type TestApp } from "./helpers/harness.ts";
 
-
 const PASSWORD = "correct-horse-battery";
 const ADMIN_EMAIL = "admin@example.com";
 
