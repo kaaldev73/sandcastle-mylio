@@ -217,6 +217,19 @@ export async function createApp(config: Config): Promise<App> {
       keys: ["id"],
     },
     {
+      method: "GET",
+      pattern:
+        /^\/api\/libraries\/(\d+)\/assets\/(\d+)\/(?:neighbors|neighbours)$/,
+      handler: assets.neighbours,
+      keys: ["id", "assetId"],
+    },
+    {
+      method: "GET",
+      pattern: /^\/api\/assets\/(\d+)\/(?:neighbors|neighbours)$/,
+      handler: assets.neighbours,
+      keys: ["assetId"],
+    },
+    {
       method: "POST",
       pattern: /^\/api\/libraries\/(\d+)\/albums$/,
       handler: albums.create,

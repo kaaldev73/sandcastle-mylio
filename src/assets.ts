@@ -6,7 +6,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import type { Auth, Ctx } from "./auth.ts";
 import type { Config } from "./config.ts";
-import { dateRangeFromQuery, requireDate } from "./dates.ts";
+import { requireDate } from "./dates.ts";
 import { readCaptureDate } from "./exif.ts";
 import { HttpError, readJsonBody, readRawBody, sendJson } from "./http.ts";
 import {
@@ -18,8 +18,16 @@ import { libraryAccessibleBy } from "./libraries.ts";
 import {
   applyRatingChange,
   ratingChangeFromBody,
-  ratingFilterFromQuery,
 } from "./rating.ts";
+import { parsePaging } from "./paging.ts";
+import {
+  assetScope,
+  assetInScope,
+  assetsBefore,
+  assetsInScope,
+  neighbouringAsset,
+  scopeOrder,
+} from "./scope.ts";
 
 export interface AssetRow {
   id: number;
@@ -41,6 +49,15 @@ export interface AssetRow {
 /** Columns selected wherever an AssetRow is read, kept in sync in one place. */
 export const ASSET_COLUMNS = `id, library_id, filename, mime_type, byte_size, content_hash,
          capture_date, date_override, capture_source, storage_path, thumbnail, thumbnail_mime,
+         flag, stars`;
+
+/**
+ * ASSET_COLUMNS without the thumbnail blobs. Listing and navigation never
+ * show the preview bytes (the thumbnail endpoint serves them), so a grid
+ * sweep over thousands of Assets does not drag every blob out of SQLite.
+ */
+export const ASSET_COLUMNS_LIGHT = `id, library_id, filename, mime_type, byte_size, content_hash,
+         capture_date, date_override, capture_source, storage_path,
          flag, stars`;
 
 /** ASSET_COLUMNS prefixed for use in a join against an asset table aliased `a`. */
@@ -478,35 +495,94 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
 
     /**
      * GET /api/libraries/:id/assets — the Library's Assets as a grid, ordered
-     * by capture date (PRD Timeline ordering), newest first. Optional from/to
-     * bounds (or start/end) limit the grid to a date range, matching Timeline.
+     * by capture date (PRD Timeline ordering), newest first (`order=oldest`
+     * flips it). Optional from/to bounds (or start/end) limit the grid to a
+     * date range and Rating selectors narrow it, matching Timeline. A phone
+     * (or any client) pages with `limit` (per-page aliases work) plus
+     * `offset`/`skip` or a 1-based `page`: a paged answer carries the total,
+     * the window's offset and `hasMore`/`nextOffset` so the client can keep
+     * walking a Library of thousands of Assets in bounded steps.
      */
     list(ctx: Ctx): void {
       const member = requireMember(ctx);
       const libraryId = Number(ctx.params.id);
       requireLibrary(libraryId, member.id);
       const url = new URL(ctx.req.url ?? "/", "http://familio.local");
-      const range = dateRangeFromQuery(url);
-      const clauses = ["library_id = ?"];
-      const params: (number | string)[] = [libraryId];
-      if (range.from !== null) {
-        clauses.push("COALESCE(date_override, capture_date) >= ?");
-        params.push(range.from);
-      }
-      if (range.to !== null) {
-        clauses.push("COALESCE(date_override, capture_date) <= ?");
-        params.push(range.to);
-      }
-      const rating = ratingFilterFromQuery(url);
-      clauses.push(...rating.clauses);
-      params.push(...rating.params);
-      const assets = db
+      const scope = assetScope(libraryId, url);
+      const where = `WHERE ${scope.clauses.join(" AND ")}`;
+      const paging = parsePaging(url.searchParams);
+
+      const limitSql =
+        paging.limit === null && paging.offset === 0
+          ? ""
+          : ` LIMIT ? OFFSET ?`;
+      const pagingParams: number[] =
+        limitSql === "" ? [] : [paging.limit ?? -1, paging.offset];
+
+      const rows = db
         .prepare(
-          `SELECT ${ASSET_COLUMNS} FROM asset WHERE ${clauses.join(" AND ")}
-           ORDER BY COALESCE(date_override, capture_date) DESC, id DESC`,
+          `SELECT ${ASSET_COLUMNS_LIGHT} FROM asset ${where}
+           ${scopeOrder(scope)}${limitSql}`,
         )
-        .all(...params) as unknown as AssetRow[];
-      sendJson(ctx.res, 200, { assets: assets.map(publicAsset) });
+        .all(...scope.params, ...pagingParams) as unknown as AssetRow[];
+
+      // Only a paginated request pays for the total count; an unpaged answer
+      // holds everything anyway.
+      const total =
+        paging.limit === null && paging.offset === 0
+          ? rows.length
+          : assetsInScope(db, scope);
+      const morePages = paging.offset + rows.length < total;
+
+      sendJson(ctx.res, 200, {
+        assets: rows.map(publicAsset),
+        total,
+        count: rows.length,
+        limit: paging.limit,
+        offset: paging.offset,
+        hasMore: morePages,
+        nextOffset: morePages ? paging.offset + rows.length : null,
+      });
+    },
+
+    /**
+     * GET /api/libraries/:id/assets/:assetId/neighbors — the single-Asset
+     * view: the Asset plus what sits immediately before and after it in the
+     * view's ordering (capture date, corrections win), so a Member can flip
+     * through photos full-screen without re-listing the grid. Accepts the
+     * same date-range, Rating and order filters as the grid, under
+     * `/neighbors` or `/neighbours`, Library named or not
+     * (GET /api/assets/:id/neighbors). When the Asset itself is filtered out
+     * of the view (e.g. hidden Rejected), it still anchors its neighbours and
+     * carries no position.
+     */
+    neighbours(ctx: Ctx): void {
+      const member = requireMember(ctx);
+      const asset = accessibleAsset(Number(ctx.params.assetId), member.id);
+      if (
+        ctx.params.id !== undefined &&
+        Number(ctx.params.id) !== asset.library_id
+      ) {
+        throw new HttpError(404, "asset_not_found");
+      }
+
+      const url = new URL(ctx.req.url ?? "/", "http://familio.local");
+      const scope = assetScope(asset.library_id, url);
+      const previous = neighbouringAsset(db, scope, asset, "previous");
+      const next = neighbouringAsset(db, scope, asset, "next");
+
+      sendJson(ctx.res, 200, {
+        asset: publicAsset(asset),
+        current: publicAsset(asset),
+        previous: previous === null ? null : publicAsset(previous),
+        next: next === null ? null : publicAsset(next),
+        position: assetInScope(db, scope, asset.id)
+          ? assetsBefore(db, scope, asset) + 1
+          : null,
+        total: assetsInScope(db, scope),
+        hasPrevious: previous !== null,
+        hasNext: next !== null,
+      });
     },
 
     /**

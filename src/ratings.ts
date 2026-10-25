@@ -1,22 +1,24 @@
 import type { DatabaseSync } from "node:sqlite";
 
-import {
-  ASSET_COLUMNS,
-  effectiveDate,
-  publicAsset,
-  type AssetRow,
-} from "./assets.ts";
+import { ASSET_COLUMNS, publicAsset, type AssetRow } from "./assets.ts";
 import type { Auth, Ctx } from "./auth.ts";
-import { dateRangeFromQuery } from "./dates.ts";
 import { firstValue, HttpError, sendJson } from "./http.ts";
 import { libraryAccessibleBy } from "./libraries.ts";
 import {
   applyRatingChange,
   ratingChangeFromBody,
   ratingChangeFromKey,
-  ratingFilterFromQuery,
   type RatingChange,
 } from "./rating.ts";
+import {
+  assetInScope,
+  assetScope,
+  assetsBefore,
+  assetsInScope,
+  firstAssetInScope,
+  neighbouringAsset,
+  type AssetScope,
+} from "./scope.ts";
 
 const SHORTCUTS = {
   pick: ["P"],
@@ -25,40 +27,6 @@ const SHORTCUTS = {
   stars: ["1", "2", "3", "4", "5"],
   clearStars: ["0"],
 };
-
-interface ReviewScope {
-  libraryId: number;
-  clauses: string[];
-  params: (string | number)[];
-  order: "asc" | "desc";
-}
-
-/** Build the date + Rating scope of a Library's review queue. */
-function scopeFrom(libraryId: number, url: URL): ReviewScope {
-  const range = dateRangeFromQuery(url);
-  const rating = ratingFilterFromQuery(url);
-  const clauses = ["library_id = ?", ...rating.clauses];
-  const params: (string | number)[] = [libraryId, ...rating.params];
-  if (range.from !== null) {
-    clauses.push("COALESCE(date_override, capture_date) >= ?");
-    params.push(range.from);
-  }
-  if (range.to !== null) {
-    clauses.push("COALESCE(date_override, capture_date) <= ?");
-    params.push(range.to);
-  }
-  const orderRaw = (
-    url.searchParams.get("order") ??
-    url.searchParams.get("direction") ??
-    url.searchParams.get("sort") ??
-    ""
-  ).toLowerCase();
-  const order =
-    orderRaw === "asc" || orderRaw === "ascending" || orderRaw === "oldest"
-      ? "asc"
-      : "desc";
-  return { libraryId, clauses, params, order };
-}
 
 function positiveInt(value: unknown, code: string): number {
   let id = NaN;
@@ -144,82 +112,25 @@ export function createRatings(db: DatabaseSync, auth: Auth) {
 
   /** Select the row coming after/before an Asset in the filtered queue. */
   const neighbour = (
-    scope: ReviewScope,
+    scope: AssetScope,
     asset: AssetRow,
     direction: "next" | "previous",
-  ): AssetRow | null => {
-    const date = effectiveDate(asset);
-    // In a newest-first queue "next" walks towards older Assets; in an
-    // oldest-first queue it walks towards newer ones.
-    const older = (direction === "next") === (scope.order === "desc");
-    const comparison = older
-      ? `(COALESCE(date_override, capture_date) < ? OR
-          (COALESCE(date_override, capture_date) = ? AND id < ?))`
-      : `(COALESCE(date_override, capture_date) > ? OR
-          (COALESCE(date_override, capture_date) = ? AND id > ?))`;
-    // Closest neighbour: the newest of the older rows, or oldest of the newer.
-    const order = older ? "DESC" : "ASC";
-    const row = db
-      .prepare(
-        `SELECT ${ASSET_COLUMNS} FROM asset
-         WHERE ${scope.clauses.join(" AND ")} AND ${comparison}
-         ORDER BY COALESCE(date_override, capture_date) ${order}, id ${order}
-         LIMIT 1`,
-      )
-      .get(...scope.params, date, date, asset.id) as AssetRow | undefined;
-    return row ?? null;
-  };
+  ): AssetRow | null => neighbouringAsset(db, scope, asset, direction);
 
-  const rowsBefore = (scope: ReviewScope, asset: AssetRow): number => {
-    const date = effectiveDate(asset);
-    const comparison =
-      scope.order === "desc"
-        ? `(COALESCE(date_override, capture_date) > ? OR
-            (COALESCE(date_override, capture_date) = ? AND id > ?))`
-        : `(COALESCE(date_override, capture_date) < ? OR
-            (COALESCE(date_override, capture_date) = ? AND id < ?))`;
-    const row = db
-      .prepare(
-        `SELECT COUNT(*) AS n FROM asset
-         WHERE ${scope.clauses.join(" AND ")} AND ${comparison}`,
-      )
-      .get(...scope.params, date, date, asset.id) as { n: number };
-    return row.n;
-  };
+  const rowsBefore = (scope: AssetScope, asset: AssetRow): number =>
+    assetsBefore(db, scope, asset);
 
-  const total = (scope: ReviewScope): number => {
-    const row = db
-      .prepare(
-        `SELECT COUNT(*) AS n FROM asset WHERE ${scope.clauses.join(" AND ")}`,
-      )
-      .get(...scope.params) as { n: number };
-    return row.n;
-  };
+  const total = (scope: AssetScope): number => assetsInScope(db, scope);
 
-  const firstInQueue = (scope: ReviewScope): AssetRow | null => {
-    const order = scope.order === "asc" ? "ASC" : "DESC";
-    const row = db
-      .prepare(
-        `SELECT ${ASSET_COLUMNS} FROM asset
-         WHERE ${scope.clauses.join(" AND ")}
-         ORDER BY COALESCE(date_override, capture_date) ${order}, id ${order}
-         LIMIT 1`,
-      )
-      .get(...scope.params) as AssetRow | undefined;
-    return row ?? null;
-  };
+  const firstInQueue = (scope: AssetScope): AssetRow | null =>
+    firstAssetInScope(db, scope);
 
-  const matchesScope = (scope: ReviewScope, assetId: number): boolean =>
-    db
-      .prepare(
-        `SELECT 1 FROM asset
-         WHERE id = ? AND ${scope.clauses.join(" AND ")}`,
-      )
-      .get(assetId, ...scope.params) !== undefined;
+  const matchesScope = (scope: AssetScope, assetId: number): boolean =>
+    assetInScope(db, scope, assetId);
 
   /** Current/neighbours/position for the review view. */
   const reviewState = (
-    scope: ReviewScope,
+    scope: AssetScope,
     current: AssetRow | null,
   ): Record<string, unknown> => {
     const totalRows = total(scope);
@@ -256,7 +167,7 @@ export function createRatings(db: DatabaseSync, auth: Auth) {
     const libraryId = Number(ctx.params.id);
     requireLibrary(libraryId, member.id);
     const url = urlOf(ctx);
-    const scope = scopeFrom(libraryId, url);
+    const scope = assetScope(libraryId, url);
 
     const anchorRaw = firstValue(ctx.body, url.searchParams, [
       "assetId",
@@ -337,7 +248,7 @@ export function createRatings(db: DatabaseSync, auth: Auth) {
     applyRatingChange(db, asset.id, change);
     const updated = accessibleAsset(asset.id, member.id);
 
-    const scope = scopeFrom(libraryId, url);
+    const scope = assetScope(libraryId, url);
     const nextCurrent = neighbour(scope, updated, direction);
     sendJson(ctx.res, 200, {
       ...reviewState(scope, nextCurrent),
