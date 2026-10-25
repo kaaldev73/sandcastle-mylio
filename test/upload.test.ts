@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import {
-  makeJpeg,
-  makePng,
-} from "./helpers/images.ts";
+import { makeJpeg, makePng } from "./helpers/images.ts";
 import { sessionCookie, startTestApp, type TestApp } from "./helpers/harness.ts";
 
 const PASSWORD = "correct-horse-battery";
@@ -46,10 +43,14 @@ async function joinMember(app: TestApp, adminCookie: string, email: string): Pro
   return sessionCookie(accepted)!;
 }
 
-async function privateLibrary(app: TestApp, cookie: string): Promise<Library> {
+async function listLibraries(app: TestApp, cookie: string): Promise<Library[]> {
   const res = await app.fetch("/api/libraries", { headers: { cookie } });
   const { libraries } = (await res.json()) as { libraries: Library[] };
-  return libraries.find((l) => l.kind === "private")!;
+  return libraries;
+}
+
+async function privateLibrary(app: TestApp, cookie: string): Promise<Library> {
+  return (await listLibraries(app, cookie)).find((l) => l.kind === "private")!;
 }
 
 async function listAssets(app: TestApp, cookie: string, libraryId: number): Promise<Asset[]> {
@@ -73,7 +74,7 @@ function upload(
   });
 }
 
-/** Send one batch Upload action: many files in a single request. */
+/** One file as the client submits it in a batch Upload action. */
 interface BatchFile {
   filename?: string;
   modifiedMs?: number;
@@ -81,6 +82,7 @@ interface BatchFile {
   contentBase64?: string;
 }
 
+/** Send one batch Upload action: many files in a single request. */
 function batch(
   app: TestApp,
   cookie: string,
@@ -154,8 +156,9 @@ test("the same upload key in a different Library is a separate upload", async ()
     const adminCookie = await setupAdmin(app);
     const memberCookie = await joinMember(app, adminCookie, "mem@example.com");
     const privateLib = await privateLibrary(app, memberCookie);
-    const family = (await (await app.fetch("/api/libraries", { headers: { cookie: memberCookie } })).json() as { libraries: Library[] }).libraries
-      .find((l) => l.kind === "family")!;
+    const family = (await listLibraries(app, memberCookie)).find(
+      (l) => l.kind === "family",
+    )!;
     const bytes = await makeJpeg();
 
     const first = await upload(app, memberCookie, privateLib.id, bytes, {

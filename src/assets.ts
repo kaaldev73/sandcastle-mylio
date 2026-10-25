@@ -106,6 +106,27 @@ function describeFile(name: string | null): string {
   return name === null ? "this file" : `"${name}"`;
 }
 
+/** A trimmed, non-empty string field on a batch entry, or null. */
+function optionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+}
+
+/** A positive epoch-ms number field on a batch entry, or null. */
+function optionalEpochMs(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : null;
+}
+
+/** One file's outcome within a batch Upload response. */
+interface BatchResult {
+  filename: string | null;
+  status: "uploaded" | "duplicate" | "failed";
+  asset?: Record<string, unknown>;
+  error?: string;
+  message?: string;
+}
+
 /**
  * Build the Assets API: Upload a photo into a Library, list a Library's Assets
  * as a grid, and download an Asset's thumbnail or untouched original. Every
@@ -133,21 +154,28 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
     return asset;
   };
 
+  /** A Library the Member may access, or throw 404 (never revealing why). */
+  const requireLibrary = (libraryId: number, memberId: number): void => {
+    if (!libraryAccessibleBy(db, libraryId, memberId)) {
+      throw new HttpError(404, "library_not_found");
+    }
+  };
+
   /** Record an upload key → Asset binding, so a retry resolves to the same
    * Asset. Only the first outcome for a key is kept (INSERT OR IGNORE): a
    * resumed Upload keeps its original result even if the retry differs. */
   const rememberSession = (
     libraryId: number,
     uploaderId: number,
-    uploadKey: string,
+    uploadKey: string | null,
     assetId: number,
   ): void => {
-    if (uploadKey === "") return;
+    if (!uploadKey) return;
     db.prepare(
       `INSERT OR IGNORE INTO upload_session
          (library_id, uploader_id, upload_key, asset_id, created_at)
        VALUES (?, ?, ?, ?, ?)`,
-    ).run(libraryId, uploaderId, uploadKey, assetId, Date.now());
+    ).run(libraryId, uploaderId, uploadKey, assetId, now());
   };
 
   /**
@@ -168,8 +196,10 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
       modifiedMs: number | null;
       uploadKey: string | null;
     },
-  ): Promise<{ created: boolean; resumed: boolean; asset: AssetRow }> => {
-    // 1. Resume: a key we already served hands back its Asset as-is.
+  ): Promise<{ created: boolean; asset: AssetRow }> => {
+    // 1. Resume: a key we already served hands back its Asset as-is. The
+    // lookup is scoped to the Library and uploader, so a key never crosses
+    // either boundary.
     if (input.uploadKey) {
       const prior = db
         .prepare(
@@ -179,8 +209,8 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
             WHERE us.library_id = ? AND us.uploader_id = ? AND us.upload_key = ?`,
         )
         .get(libraryId, member.id, input.uploadKey) as AssetRow | undefined;
-      if (prior && prior.library_id === libraryId) {
-        return { created: false, resumed: true, asset: prior };
+      if (prior) {
+        return { created: false, asset: prior };
       }
     }
 
@@ -228,8 +258,8 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
       )
       .get(libraryId, contentHash) as AssetRow | undefined;
     if (existing) {
-      rememberSession(libraryId, member.id, input.uploadKey ?? "", existing.id);
-      return { created: false, resumed: false, asset: existing };
+      rememberSession(libraryId, member.id, input.uploadKey, existing.id);
+      return { created: false, asset: existing };
     }
 
     // Store the original untouched, content-addressed so identical bytes are
@@ -261,8 +291,8 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
       );
 
     const assetId = Number(info.lastInsertRowid);
-    rememberSession(libraryId, member.id, input.uploadKey ?? "", assetId);
-    return { created: true, resumed: false, asset: accessibleAsset(assetId, member.id) };
+    rememberSession(libraryId, member.id, input.uploadKey, assetId);
+    return { created: true, asset: accessibleAsset(assetId, member.id) };
   };
 
   /** Apply a date correction shared by the two PATCH route aliases. */
@@ -294,12 +324,9 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
     async upload(ctx: Ctx): Promise<void> {
       const member = requireMember(ctx);
       const libraryId = Number(ctx.params.id);
-      if (!libraryAccessibleBy(db, libraryId, member.id)) {
-        throw new HttpError(404, "library_not_found");
-      }
+      requireLibrary(libraryId, member.id);
 
       const bytes = await readRawBody(ctx.req, config.UPLOAD_MAX_BYTES);
-
       const stored = await storeAsset(member, libraryId, {
         bytes,
         filename: clientFilename(ctx),
@@ -322,13 +349,12 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
     async uploadBatch(ctx: Ctx): Promise<void> {
       const member = requireMember(ctx);
       const libraryId = Number(ctx.params.id);
-      if (!libraryAccessibleBy(db, libraryId, member.id)) {
-        throw new HttpError(404, "library_not_found");
-      }
+      requireLibrary(libraryId, member.id);
 
-      // Raw route: the body is parsed here with a batch-sized limit rather
-      // than the per-upload default.
-      const body = await readJsonBody(ctx.req, config.UPLOAD_MAX_BYTES * 8);
+      // Raw route: the body is parsed and size-capped here so one request can
+      // carry a whole batch rather than a single upload's worth of bytes.
+      const batchBodyLimit = config.UPLOAD_MAX_BYTES * 8;
+      const body = await readJsonBody(ctx.req, batchBodyLimit);
       const files = body.files;
       if (!Array.isArray(files) || files.length === 0) {
         throw new HttpError(
@@ -345,29 +371,12 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
         );
       }
 
-      const results: {
-        filename: string | null;
-        status: "uploaded" | "duplicate" | "failed";
-        asset?: Record<string, unknown>;
-        error?: string;
-        message?: string;
-      }[] = [];
+      const results: BatchResult[] = [];
 
       for (const file of files as Record<string, unknown>[]) {
-        const filename =
-          typeof file.filename === "string" && file.filename.trim() !== ""
-            ? file.filename.trim()
-            : null;
-        const modifiedMs =
-          typeof file.modifiedMs === "number" &&
-          Number.isFinite(file.modifiedMs) &&
-          file.modifiedMs > 0
-            ? file.modifiedMs
-            : null;
-        const uploadKey =
-          typeof file.uploadKey === "string" && file.uploadKey.trim() !== ""
-            ? file.uploadKey.trim()
-            : null;
+        const filename = optionalString(file.filename);
+        const modifiedMs = optionalEpochMs(file.modifiedMs);
+        const uploadKey = optionalString(file.uploadKey);
 
         try {
           const decoded =
@@ -405,7 +414,7 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
             filename,
             status: "failed",
             error: http?.code ?? "internal_error",
-            message: http?.detail ?? undefined,
+            message: http?.detail,
           });
         }
       }
@@ -421,9 +430,7 @@ export function createAssets(db: DatabaseSync, auth: Auth, config: Config) {
     list(ctx: Ctx): void {
       const member = requireMember(ctx);
       const libraryId = Number(ctx.params.id);
-      if (!libraryAccessibleBy(db, libraryId, member.id)) {
-        throw new HttpError(404, "library_not_found");
-      }
+      requireLibrary(libraryId, member.id);
       const range = dateRangeFromQuery(
         new URL(ctx.req.url ?? "/", "http://familio.local"),
       );
