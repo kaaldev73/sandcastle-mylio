@@ -7,7 +7,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { Auth, Ctx } from "./auth.ts";
 import type { Config } from "./config.ts";
 import { requireDate } from "./dates.ts";
-import { readCaptureDate } from "./exif.ts";
+import { readCaptureDate, readGpsLocation } from "./exif.ts";
 import { HttpError, readJsonBody, readRawBody, sendJson } from "./http.ts";
 import {
   detectImageType,
@@ -45,12 +45,14 @@ export interface AssetRow {
   thumbnail_mime: string;
   flag: "unflagged" | "pick" | "reject";
   stars: number;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 /** Columns selected wherever an AssetRow is read, kept in sync in one place. */
 export const ASSET_COLUMNS = `id, library_id, filename, mime_type, byte_size, content_hash,
          capture_date, date_override, capture_source, storage_path, thumbnail, thumbnail_mime,
-         flag, stars`;
+         flag, stars, latitude, longitude`;
 
 /**
  * ASSET_COLUMNS without the thumbnail blobs. Listing and navigation never
@@ -59,7 +61,7 @@ export const ASSET_COLUMNS = `id, library_id, filename, mime_type, byte_size, co
  */
 export const ASSET_COLUMNS_LIGHT = `id, library_id, filename, mime_type, byte_size, content_hash,
          capture_date, date_override, capture_source, storage_path,
-         flag, stars`;
+         flag, stars, latitude, longitude`;
 
 /** ASSET_COLUMNS prefixed for use in a join against an asset table aliased `a`. */
 const JOINED_ASSET_COLUMNS = ASSET_COLUMNS.split(",")
@@ -83,6 +85,9 @@ export function publicAsset(a: AssetRow): Record<string, unknown> {
     captureDate: new Date(effectiveDate(a)).toISOString(),
     captureSource: a.capture_source,
     dateOverridden: a.date_override !== null,
+    latitude: a.latitude,
+    longitude: a.longitude,
+    hasLocation: a.latitude !== null && a.longitude !== null,
     flag: a.flag,
     ratingFlag: a.flag,
     stars: a.stars,
@@ -198,6 +203,11 @@ export async function ingestAsset(
     );
   }
 
+  // Location: when the photo carries GPS metadata, keep the extracted
+  // coordinates as derived data; when it does not, the Asset simply stays
+  // without a place and remains fully findable (PRD #13).
+  const location = readGpsLocation(input.bytes);
+
   // Store the original untouched, content-addressed so identical bytes are
   // written once. Writing before the row keeps the DB from ever pointing at a
   // missing file.
@@ -207,9 +217,9 @@ export async function ingestAsset(
   const info = db
     .prepare(
       `INSERT INTO asset (library_id, uploader_id, filename, mime_type,
-         byte_size, content_hash, capture_date, capture_source, storage_path,
-         thumbnail, thumbnail_mime, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          byte_size, content_hash, capture_date, capture_source, storage_path,
+          thumbnail, thumbnail_mime, latitude, longitude, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.libraryId,
@@ -223,6 +233,8 @@ export async function ingestAsset(
       storagePath,
       thumbnail.data,
       thumbnail.mime,
+      location?.latitude ?? null,
+      location?.longitude ?? null,
       Date.now(),
     );
 

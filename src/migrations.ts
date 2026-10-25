@@ -268,6 +268,20 @@ export const migrations: readonly Migration[] = [
       `);
     },
   },
+  {
+    id: "0012-place",
+    up(db) {
+      // Location is read from the photo's own metadata (EXIF GPS) and can be
+      // filtered by (PRD #13). Keep the extracted coordinates on the Asset as
+      // derived data alongside the capture date: the original file is never
+      // rewritten, and a photo without location has NULLs, staying findable
+      // (and in the Timeline) unfiltered. Degrees are decimal, signed.
+      db.exec(`
+        ALTER TABLE asset ADD COLUMN latitude REAL;
+        ALTER TABLE asset ADD COLUMN longitude REAL;
+      `);
+    },
+  },
 ];
 
 /**

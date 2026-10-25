@@ -234,7 +234,7 @@ export interface SqlFilter {
   params: (string | number)[];
 }
 
-function queryFirst(
+export function queryFirst(
   url: URL,
   names: readonly string[],
 ): string | undefined {
@@ -245,7 +245,7 @@ function queryFirst(
   return undefined;
 }
 
-function queryHas(url: URL, names: readonly string[]): boolean {
+export function queryHas(url: URL, names: readonly string[]): boolean {
   return names.some((name) => url.searchParams.has(name));
 }
 
