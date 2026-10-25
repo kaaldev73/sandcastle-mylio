@@ -1,15 +1,5 @@
 import { HttpError } from "./http.ts";
-import type { SqlFilter } from "./rating.ts";
-
-/**
- * Build the SQL predicate for Location ("place") filters from a query string
- * (PRD: filter a Library by place where the photo has location data). A place
- * is a point plus a radius in kilometres, given as decimal degrees; the match
- * is a bounding box around that point — generous by up to √2 of the radius on
- * the diagonal, well inside "somewhere" for the map-less place finder this
- * seam serves. Coordinates govern precision; Photos without location data
- * never match a place, but stay in unfiltered views.
- */
+import { queryFirst, queryHas, type SqlFilter } from "./rating.ts";
 
 /** Mean meridian length of one degree of latitude, in kilometres. */
 const KM_PER_DEGREE = 111.32;
@@ -19,18 +9,6 @@ const DEFAULT_RADIUS_KM = 100;
 
 /** No radius may exceed the widest span a place can sensibly name. */
 const MAX_RADIUS_KM = 20015;
-
-function queryFirst(url: URL, names: readonly string[]): string | undefined {
-  for (const name of names) {
-    const value = url.searchParams.get(name);
-    if (value !== null && value.trim() !== "") return value.trim();
-  }
-  return undefined;
-}
-
-function queryHas(url: URL, names: readonly string[]): boolean {
-  return names.some((name) => url.searchParams.has(name));
-}
 
 const LAT_KEYS = ["lat", "latitude"] as const;
 const LON_KEYS = ["lon", "lng", "longitude"] as const;
@@ -51,8 +29,10 @@ function parsePoint(place: string): { lat: number; lon: number } | null {
   return Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
 }
 
-/** Latitude status of Assets with usable coordinates (see 0012-place). */
+/** SQL predicate for Assets carrying both GPS coordinates (see 0012-place). */
 const LOCATED = "latitude IS NOT NULL AND longitude IS NOT NULL";
+/** Its complement, parenthesised: filter clauses join with " AND ". */
+const UNLOCATED = "(latitude IS NULL OR longitude IS NULL)";
 
 /**
  * Build the SQL predicate for Location filters from a query string. Accepts a
@@ -92,11 +72,7 @@ export function placeFilterFromQuery(url: URL): SqlFilter {
     let radius = DEFAULT_RADIUS_KM;
     if (radiusRaw !== undefined) {
       const parsed = number(radiusRaw);
-      if (
-        parsed === null ||
-        parsed <= 0 ||
-        parsed > MAX_RADIUS_KM
-      ) {
+      if (parsed === null || parsed <= 0 || parsed > MAX_RADIUS_KM) {
         throw new HttpError(400, "invalid_radius");
       }
       radius = parsed;
@@ -120,7 +96,7 @@ export function placeFilterFromQuery(url: URL): SqlFilter {
   if (queryHas(url, ["withLocation", "hasLocation", "located"])) {
     filter.clauses.push(LOCATED);
   } else if (queryHas(url, ["withoutLocation", "noLocation", "unlocated"])) {
-    filter.clauses.push("latitude IS NULL OR longitude IS NULL");
+    filter.clauses.push(UNLOCATED);
   }
 
   return filter;

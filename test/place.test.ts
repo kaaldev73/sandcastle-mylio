@@ -214,6 +214,39 @@ test("filtering a Library by place returns the matching Assets, and the rest sta
   }
 });
 
+test("a place filter stays inside the requested Library", async () => {
+  const app = await startTestApp();
+  try {
+    const adminCookie = await setupAdmin(app);
+    const adminLib = await privateLibrary(app, adminCookie);
+
+    // Another Member's Library holds an unplaced photo of its own; a
+    // "without location" query in one Library must never drop rows from it.
+    const invited = await app.fetch("/api/invitations", {
+      method: "POST",
+      headers: { cookie: adminCookie },
+      body: JSON.stringify({ email: "member@example.com" }),
+    });
+    assert.equal(invited.status, 201);
+    const { token } = (await invited.json()) as { token: string };
+    const accepted = await app.fetch("/api/invitations/accept", {
+      method: "POST",
+      body: JSON.stringify({ token, password: PASSWORD }),
+    });
+    assert.equal(accepted.status, 201);
+    const memberCookie = sessionCookie(accepted)!;
+    const memberLib = await privateLibrary(app, memberCookie);
+    await uploadAll(app, memberCookie, memberLib.id, [makePng()]);
+
+    const [unplaced] = await uploadAll(app, adminCookie, adminLib.id, [makePng()]);
+    const unplacedOnly = await listAssets(app, adminCookie, adminLib.id, "?withoutLocation=true");
+    assert.deepEqual(unplacedOnly.assets.map((a) => a.id), [unplaced]);
+    assert.equal(unplacedOnly.total, 1);
+  } finally {
+    await app.stop();
+  }
+});
+
 test("the place filter narrows the Timeline too", async () => {
   const app = await startTestApp();
   try {

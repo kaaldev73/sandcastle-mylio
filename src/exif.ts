@@ -108,7 +108,8 @@ function tagString(tiff: Tiff, entry: TagEntry | undefined): string {
     .trim();
 }
 
-/** Unwind a tag's value into NULs; the last keepable characters win. */
+/** A tag's scalar values in entry order (signed types unwrapped), truncated
+ * at the first entry the buffer does not fully contain. */
 function tagInts(tiff: Tiff, entry: TagEntry): number[] {
   const bytes = TYPE_BYTES[entry.type] ?? 1;
   const values: number[] = [];
@@ -128,7 +129,8 @@ function tagInts(tiff: Tiff, entry: TagEntry): number[] {
   return values;
 }
 
-/** A tag's numbers (a RATIONAL value becomes numerator/denominator pairs). */
+/** A tag's values as numbers; each RATIONAL pair becomes its quotient
+ * (NaN when the denominator is 0). */
 function tagValues(tiff: Tiff, entry: TagEntry): number[] {
   const bytes = TYPE_BYTES[entry.type] ?? 1;
   if (bytes !== 8) return tagInts(tiff, entry);
