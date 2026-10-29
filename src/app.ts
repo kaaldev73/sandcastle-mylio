@@ -14,6 +14,7 @@ import { createBackups } from "./backup.ts";
 import type { Config } from "./config.ts";
 import { openDatabase } from "./db.ts";
 import { createDeletion } from "./deletion.ts";
+import { createDuplicates } from "./duplicates.ts";
 import { HttpError, parseCookies, readJsonBody, sendJson } from "./http.ts";
 import { createImports } from "./imports.ts";
 import { createLibraries } from "./libraries.ts";
@@ -50,6 +51,7 @@ export async function createApp(config: Config): Promise<App> {
   const timeline = createTimeline(db, auth);
   const ratings = createRatings(db, auth);
   const share = createShare(db, auth);
+  const duplicates = createDuplicates(db, auth);
   const backups = createBackups(db, auth, config);
 
   // method + path → handler. Body is parsed for every route uniformly; GET
@@ -91,6 +93,18 @@ export async function createApp(config: Config): Promise<App> {
       method: "GET",
       pattern: /^\/api\/libraries\/(\d+)\/(?:deleted|trash|recoverable)$/,
       handler: deletion.listDeleted,
+      keys: ["id"],
+    },
+    {
+      method: "GET",
+      pattern: /^\/api\/libraries\/(\d+)\/duplicates$/,
+      handler: duplicates.list,
+      keys: ["id"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/libraries\/(\d+)\/duplicates\/resolve$/,
+      handler: duplicates.resolve,
       keys: ["id"],
     },
     {

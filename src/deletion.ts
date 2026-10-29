@@ -59,7 +59,7 @@ function truthy(value: unknown): boolean {
  * restoring and permanently removing are all destructive or state-changing
  * enough that the client must say so deliberately, matching Member removal.
  */
-function isConfirmed(ctx: Ctx): boolean {
+export function isConfirmed(ctx: Ctx): boolean {
   return truthy(firstValue(ctx.body, queryOf(ctx), CONFIRM_KEYS));
 }
 
