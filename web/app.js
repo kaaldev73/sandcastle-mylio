@@ -1,6 +1,7 @@
 // App shell: path-based routing, session check, Library switcher.
 import { api, ApiError } from "./api.js";
 import { el } from "./dom.js";
+import { browse } from "./browse.js";
 import { inviteScreen, resetScreen, setupScreen, signInScreen } from "./auth.js";
 
 const root = document.getElementById("app");
@@ -60,15 +61,14 @@ function shell(libraries) {
 
   const main = document.createElement("main");
   const heading = document.createElement("h1");
-  const who = document.createElement("p");
-  who.className = "muted";
-  who.textContent = `Signed in as ${member.email}`;
-  main.append(heading, who);
+  const content = document.createElement("div");
+  main.append(heading, content);
 
   const show = () => {
     heading.textContent = current ? libraryLabel(current) : "No Library";
     if (current) localStorage.setItem(LIBRARY_KEY, String(current.id));
-    document.dispatchEvent(new CustomEvent("familio:library", { detail: current }));
+    if (current) browse(content, current);
+    else content.replaceChildren();
   };
   select.addEventListener("change", () => {
     current = libraries.find((l) => l.id === Number(select.value));
