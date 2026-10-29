@@ -13,6 +13,7 @@ import { createAuth, type Ctx } from "./auth.ts";
 import { createBackups } from "./backup.ts";
 import type { Config } from "./config.ts";
 import { openDatabase } from "./db.ts";
+import { createDeletion } from "./deletion.ts";
 import { HttpError, parseCookies, readJsonBody, sendJson } from "./http.ts";
 import { createImports } from "./imports.ts";
 import { createLibraries } from "./libraries.ts";
@@ -41,6 +42,7 @@ export async function createApp(config: Config): Promise<App> {
   const auth = createAuth(db, config);
   const libraries = createLibraries(db, auth);
   const assets = createAssets(db, auth, config);
+  const deletion = createDeletion(db, auth);
   const albums = createAlbums(db, auth);
   const members = createMembers(db, auth);
   const imports = createImports(db, auth, config);
@@ -81,6 +83,12 @@ export async function createApp(config: Config): Promise<App> {
       method: "GET",
       pattern: /^\/api\/libraries\/(\d+)$/,
       handler: libraries.get,
+      keys: ["id"],
+    },
+    {
+      method: "GET",
+      pattern: /^\/api\/libraries\/(\d+)\/(?:deleted|trash|recoverable)$/,
+      handler: deletion.listDeleted,
       keys: ["id"],
     },
     {
@@ -271,6 +279,66 @@ export async function createApp(config: Config): Promise<App> {
       pattern: /^\/api\/albums\/(\d+)\/assets\/(\d+)$/,
       handler: albums.removeAsset,
       keys: ["id", "assetId"],
+    },
+    {
+      method: "DELETE",
+      pattern: /^\/api\/libraries\/(\d+)\/assets\/(\d+)$/,
+      handler: deletion.remove,
+      keys: ["id", "assetId"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/libraries\/(\d+)\/assets\/(\d+)\/restore$/,
+      handler: deletion.restore,
+      keys: ["id", "assetId"],
+    },
+    {
+      method: "DELETE",
+      pattern: /^\/api\/libraries\/(\d+)\/assets\/(\d+)\/permanent$/,
+      handler: deletion.purge,
+      keys: ["id", "assetId"],
+    },
+    {
+      method: "DELETE",
+      pattern: /^\/api\/assets\/(\d+)$/,
+      handler: deletion.remove,
+      keys: ["id"],
+    },
+    {
+      method: "DELETE",
+      pattern: /^\/api\/assets\/(\d+)\/(?:delete|trash)$/,
+      handler: deletion.remove,
+      keys: ["id"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/assets\/(\d+)\/(?:delete|trash)$/,
+      handler: deletion.remove,
+      keys: ["id"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/assets\/(\d+)\/(?:restore|recover|undelete|untrash)$/,
+      handler: deletion.restore,
+      keys: ["id"],
+    },
+    {
+      method: "PATCH",
+      pattern: /^\/api\/assets\/(\d+)\/(?:restore|recover|undelete|untrash)$/,
+      handler: deletion.restore,
+      keys: ["id"],
+    },
+    {
+      method: "DELETE",
+      pattern: /^\/api\/assets\/(\d+)\/(?:permanent|purge)$/,
+      handler: deletion.purge,
+      keys: ["id"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/assets\/(\d+)\/(?:permanent|purge)$/,
+      handler: deletion.purge,
+      keys: ["id"],
     },
     {
       method: "PATCH",

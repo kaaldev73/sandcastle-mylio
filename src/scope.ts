@@ -28,12 +28,42 @@ function ascendingFromQuery(url: URL): boolean {
   return raw === "asc" || raw === "ascending" || raw === "oldest";
 }
 
+/**
+ * The deletion clause of a listing. Deleted Assets are recoverable and hidden
+ * by default; a client may ask for only the deleted ones (deleted=true/only)
+ * or for both (includeDeleted=true or deleted=all).
+ */
+function deletedClause(url: URL): string | null {
+  const flag = (value: string | null): string => (value ?? "").trim().toLowerCase();
+  const deleted = flag(url.searchParams.get("deleted"));
+  const include = flag(
+    url.searchParams.get("includeDeleted") ??
+      url.searchParams.get("include_deleted"),
+  );
+  if (["only", "true", "yes", "1", "deleted"].includes(deleted)) {
+    return "deleted_at IS NOT NULL";
+  }
+  if (
+    ["true", "yes", "1", "on"].includes(include) ||
+    ["all", "any", "*"].includes(deleted)
+  ) {
+    return null;
+  }
+  return "deleted_at IS NULL";
+}
+
 /** Build the Listing scope of one Library from a request URL. */
 export function assetScope(libraryId: number, url: URL): AssetScope {
   const range = dateRangeFromQuery(url);
   const rating = ratingFilterFromQuery(url);
   const place = placeFilterFromQuery(url);
-  const clauses = ["library_id = ?", ...rating.clauses, ...place.clauses];
+  const deleted = deletedClause(url);
+  const clauses = [
+    "library_id = ?",
+    ...(deleted ? [deleted] : []),
+    ...rating.clauses,
+    ...place.clauses,
+  ];
   const params: (string | number)[] = [
     libraryId,
     ...rating.params,

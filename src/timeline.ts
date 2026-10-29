@@ -282,7 +282,7 @@ export function createTimeline(db: DatabaseSync, auth: Auth) {
     }
 
     const scope = resolveScope(url.searchParams, level);
-    const clauses = ["library_id = ?"];
+    const clauses = ["library_id = ?", "deleted_at IS NULL"];
     const queryParams: (number | string)[] = [libraryId];
     if (scope.from !== null) {
       clauses.push("COALESCE(date_override, capture_date) >= ?");

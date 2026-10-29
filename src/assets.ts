@@ -47,12 +47,13 @@ export interface AssetRow {
   stars: number;
   latitude: number | null;
   longitude: number | null;
+  deleted_at: number | null;
 }
 
 /** Columns selected wherever an AssetRow is read, kept in sync in one place. */
 export const ASSET_COLUMNS = `id, library_id, filename, mime_type, byte_size, content_hash,
          capture_date, date_override, capture_source, storage_path, thumbnail, thumbnail_mime,
-         flag, stars, latitude, longitude`;
+         flag, stars, latitude, longitude, deleted_at`;
 
 /**
  * ASSET_COLUMNS without the thumbnail blobs. Listing and navigation never
@@ -61,7 +62,7 @@ export const ASSET_COLUMNS = `id, library_id, filename, mime_type, byte_size, co
  */
 export const ASSET_COLUMNS_LIGHT = `id, library_id, filename, mime_type, byte_size, content_hash,
          capture_date, date_override, capture_source, storage_path,
-         flag, stars, latitude, longitude`;
+         flag, stars, latitude, longitude, deleted_at`;
 
 /** ASSET_COLUMNS prefixed for use in a join against an asset table aliased `a`. */
 const JOINED_ASSET_COLUMNS = ASSET_COLUMNS.split(",")
@@ -76,6 +77,7 @@ export function effectiveDate(a: AssetRow): number {
 /** Public, grid-ready shape of an Asset; storage details are never exposed. */
 export function publicAsset(a: AssetRow): Record<string, unknown> {
   const rejected = a.flag === "reject";
+  const deleted = a.deleted_at !== null;
   return {
     id: a.id,
     filename: a.filename,
@@ -94,6 +96,9 @@ export function publicAsset(a: AssetRow): Record<string, unknown> {
     pick: a.flag === "pick",
     rejected,
     dimmed: rejected,
+    deleted,
+    recoverable: deleted,
+    deletedAt: deleted ? new Date(a.deleted_at!).toISOString() : null,
     thumbnailUrl: `/api/assets/${a.id}/thumbnail`,
     originalUrl: `/api/assets/${a.id}/original`,
   };
