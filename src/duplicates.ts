@@ -69,6 +69,11 @@ export function createDuplicates(db: DatabaseSync, auth: Auth) {
     return sets;
   };
 
+  const findAsset = (id: number): AssetRow | undefined =>
+    db.prepare(`SELECT ${ASSET_COLUMNS} FROM asset WHERE id = ?`).get(id) as
+      | AssetRow
+      | undefined;
+
   const suggest = (set: Candidate[]): Candidate =>
     set.reduce((best, c) =>
       compareScores(keeperScore(c), keeperScore(best)) > 0 ? c : best,
@@ -105,9 +110,7 @@ export function createDuplicates(db: DatabaseSync, auth: Auth) {
       if (!Number.isInteger(keeperId) || keeperId <= 0) {
         throw new HttpError(400, "missing_keeperId");
       }
-      const keeper = db
-        .prepare(`SELECT ${ASSET_COLUMNS} FROM asset WHERE id = ?`)
-        .get(keeperId) as AssetRow | undefined;
+      const keeper = findAsset(keeperId);
       if (
         !keeper ||
         keeper.library_id !== libraryId ||
@@ -135,15 +138,14 @@ export function createDuplicates(db: DatabaseSync, auth: Auth) {
           stars,
           keeper.id,
         );
+        const copyAlbums = db.prepare(
+          `INSERT OR IGNORE INTO album_asset (album_id, asset_id, added_at)
+           SELECT album_id, ?, added_at FROM album_asset WHERE asset_id = ?`,
+        );
+        const retire = db.prepare("UPDATE asset SET deleted_at = ? WHERE id = ?");
         for (const a of removed) {
-          db.prepare(
-            `INSERT OR IGNORE INTO album_asset (album_id, asset_id, added_at)
-             SELECT album_id, ?, added_at FROM album_asset WHERE asset_id = ?`,
-          ).run(keeper.id, a.id);
-          db.prepare("UPDATE asset SET deleted_at = ? WHERE id = ?").run(
-            now,
-            a.id,
-          );
+          copyAlbums.run(keeper.id, a.id);
+          retire.run(now, a.id);
         }
         db.exec("COMMIT");
       } catch (err) {
@@ -151,9 +153,7 @@ export function createDuplicates(db: DatabaseSync, auth: Auth) {
         throw err;
       }
 
-      const kept = db
-        .prepare(`SELECT ${ASSET_COLUMNS} FROM asset WHERE id = ?`)
-        .get(keeper.id) as unknown as AssetRow;
+      const kept = findAsset(keeper.id)!;
       sendJson(ctx.res, 200, {
         status: "ok",
         kept: publicAsset(kept),
