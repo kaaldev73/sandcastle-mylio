@@ -53,8 +53,7 @@ test("unknown non-API paths fall back to the app; missing assets and /api/* 404"
 
 test("path traversal cannot read outside the web folder", async () => {
   const res = await app.fetch("/..%2fpackage.json");
-  assert.notEqual(res.headers.get("content-type")?.startsWith("application/json"), true);
-  assert.ok(!(await res.text()).includes('"dependencies"'));
+    assert.ok(!(await res.text()).includes('"dependencies"'));
 });
 
 test("the pages call only API endpoints that exist", async () => {

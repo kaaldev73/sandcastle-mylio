@@ -1,5 +1,6 @@
 // App shell: path-based routing, session check, Library switcher.
 import { api, ApiError } from "./api.js";
+import { el } from "./dom.js";
 import { inviteScreen, resetScreen, setupScreen, signInScreen } from "./auth.js";
 
 const root = document.getElementById("app");
@@ -87,7 +88,7 @@ async function render() {
       member = await api("GET", "/api/me");
     } catch (err) {
       if (!(err instanceof ApiError) || err.status !== 401) {
-        mount(Object.assign(document.createElement("p"), { className: "center muted", textContent: "Could not reach the server." }));
+        mount(el("p", { class: "center muted" }, "Could not reach the server."));
         return;
       }
     }
