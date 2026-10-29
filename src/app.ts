@@ -19,6 +19,7 @@ import { createImports } from "./imports.ts";
 import { createLibraries } from "./libraries.ts";
 import { createMembers } from "./members.ts";
 import { createRatings } from "./ratings.ts";
+import { createShare } from "./share.ts";
 import { serveWeb } from "./static.ts";
 import { createTimeline } from "./timeline.ts";
 
@@ -48,6 +49,7 @@ export async function createApp(config: Config): Promise<App> {
   const imports = createImports(db, auth, config);
   const timeline = createTimeline(db, auth);
   const ratings = createRatings(db, auth);
+  const share = createShare(db, auth);
   const backups = createBackups(db, auth, config);
 
   // method + path → handler. Body is parsed for every route uniformly; GET
@@ -368,6 +370,24 @@ export async function createApp(config: Config): Promise<App> {
       method: "PATCH",
       pattern: /^\/api\/assets\/(\d+)\/date$/,
       handler: assets.updateDate,
+      keys: ["id"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/assets\/(\d+)\/share$/,
+      handler: share.share,
+      keys: ["id"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/assets\/(\d+)\/share\/move$/,
+      handler: share.move,
+      keys: ["id"],
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/assets\/(\d+)\/share\/copy$/,
+      handler: share.copy,
       keys: ["id"],
     },
     {
