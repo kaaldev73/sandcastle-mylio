@@ -7,17 +7,17 @@ Coolify (ADR 0002).
   variable and the Coolify steps.
 - Domain terms: [`GLOSSARY.md`](GLOSSARY.md). Decisions: [`docs/adr/`](docs/adr).
 
-## Sandcastle with OpenCode
+## Sandcastle with Claude Code
 
-The planner, implementer, reviewer, and merger use OpenCode inside Docker.
+The planner, implementer, reviewer, and merger use Claude Code inside Docker.
 
 1. Copy `.sandcastle/.env.example` to `.sandcastle/.env` and set `GH_TOKEN`.
-   Uncomment and set the API key for your selected provider; host OpenCode login
+   Uncomment and set `ANTHROPIC_API_KEY`; host Claude login
    credentials are not mounted into the sandbox. Keep this file out of Git.
 2. Build (or rebuild) the sandbox image: `npx sandcastle docker build-image`.
-3. Run `npm run sandcastle`. Every agent uses `opencode/big-pickle`; the model is
+3. Run `npm run sandcastle`. Every agent uses `claude-sonnet-5-5`; the model is
    fixed in `.sandcastle/main.mts` and has no environment override.
 
 The workflow reads GitHub issues, creates commits, and merges completed branches
-into the current branch. Provider authentication and model availability depend on
-[your OpenCode provider](https://opencode.ai/docs/providers/).
+into the current branch. Authentication and model availability depend on your
+[Anthropic account](https://docs.claude.com/en/docs/claude-code/overview).
