@@ -18,6 +18,7 @@ import { createImports } from "./imports.ts";
 import { createLibraries } from "./libraries.ts";
 import { createMembers } from "./members.ts";
 import { createRatings } from "./ratings.ts";
+import { serveWeb } from "./static.ts";
 import { createTimeline } from "./timeline.ts";
 
 export interface App {
@@ -382,6 +383,12 @@ export async function createApp(config: Config): Promise<App> {
       }
     }
     if (!handler) {
+      // The web UI owns every non-API GET; unknown /api/* stays a JSON 404.
+      const isApi = path === "/api" || path.startsWith("/api/");
+      if (!isApi && (method === "GET" || method === "HEAD")) {
+        await serveWeb(res, path, method === "HEAD");
+        return;
+      }
       sendJson(res, 404, { error: "not_found" });
       return;
     }

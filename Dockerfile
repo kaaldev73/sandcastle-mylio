@@ -12,6 +12,8 @@ RUN npm ci
 # Application source. Familio is run with tsx (TypeScript, no build step).
 COPY tsconfig.json ./
 COPY src ./src
+# Web UI: plain HTML and ES modules, served as-is (ADR 0006).
+COPY web ./web
 
 # Originals and the SQLite database live on one persistent volume. Coolify
 # mounts a volume here; DATABASE_PATH and ORIGINALS_DIR point inside it.

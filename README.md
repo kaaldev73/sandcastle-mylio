@@ -5,6 +5,10 @@ Coolify (ADR 0002).
 
 - Deploying it: [`docs/deployment.md`](docs/deployment.md) — every environment
   variable and the Coolify steps.
+- Web UI: plain HTML and ES modules in [`web/`](web), served by the app itself
+  at `/` with no build step ([ADR 0006](docs/adr/0006-web-ui-plain-html-and-es-modules.md)).
+  Open the server's URL in a browser: the first visit offers first-Admin setup,
+  then sign-in, invite acceptance (`/invite?token=…`) and password reset.
 - Domain terms: [`GLOSSARY.md`](GLOSSARY.md). Decisions: [`docs/adr/`](docs/adr).
 
 ## Sandcastle with Claude Code

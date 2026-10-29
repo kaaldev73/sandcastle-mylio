@@ -61,6 +61,17 @@ target/credential variables.
    /api/setup` with an `email` and `password` to create the first Admin
    account. Further accounts are invite-only.
 
+## Web UI
+
+The same container serves the web UI at `/` (static files from `web/`, copied
+into the image; no build step, ADR 0006). There is nothing extra to configure or
+deploy. Open your Coolify domain in a browser: on a fresh deployment choose
+"First time? Set up this server" to create the first Admin, then sign in. Invite
+links take the form `https://<domain>/invite?token=<token>` and password reset
+links `https://<domain>/reset?token=<token>`. Unknown non-API paths return the
+app; `/api/*` misses stay JSON 404s. Over HTTPS the session cookie is `HttpOnly`
+and `Secure`.
+
 ## Persistence, restart and upgrades
 
 - **Restart / redeploy.** Because the database and originals sit on the `/data`
