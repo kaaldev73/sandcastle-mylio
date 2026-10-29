@@ -33,10 +33,11 @@ function thumb(asset, onOpen) {
 /** Mount the browser for one Library into `host`; returns nothing. */
 export function browse(host, library) {
   const filter = { mode: "all", place: "", radius: "" };
-  // crumbs: [{label, level, parent}] — the Timeline path; `grid` is a date span or null.
+  // trail: [{label, level, key, from, to}] — the Timeline drill-down path.
+  // gridSpan: the trail entry (or {} for everything) shown as a grid, else null.
   let trail = [];
   let gridSpan = null;
-  let viewing = null;
+  let viewing = false;
   let token = 0;
 
   const status = el("p", { class: "msg", role: "status" });
@@ -139,7 +140,6 @@ export function browse(host, library) {
       base.set("to", span.to);
     }
     let offset = 0;
-    const loaded = [];
     const load = async () => {
       const params = new URLSearchParams(base);
       params.set("limit", String(PAGE_SIZE));
@@ -150,7 +150,6 @@ export function browse(host, library) {
         if (mine !== token) return;
         clear();
         for (const a of data.assets) {
-          loaded.push(a);
           grid.append(thumb(a, () => open(a, span)));
         }
         count.textContent = data.total + (data.total === 1 ? " photo" : " photos");
@@ -168,7 +167,7 @@ export function browse(host, library) {
 
   // ---- viewer ----
   async function open(asset, span) {
-    viewing = { id: asset.id, span };
+    viewing = true;
     await showAsset(asset.id, span);
   }
 
@@ -200,11 +199,10 @@ export function browse(host, library) {
     const bar = el("div", { class: "viewer-bar" }, prev, info, next, el("button", { onclick: close }, "Close"));
     overlay.replaceChildren(bar, el("div", { class: "viewer-stage" }, img));
     overlay.hidden = false;
-    viewing.id = id;
   }
 
   function close() {
-    viewing = null;
+    viewing = false;
     overlay.hidden = true;
     overlay.replaceChildren();
   }
