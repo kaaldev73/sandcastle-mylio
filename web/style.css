@@ -58,3 +58,10 @@ main { padding: 1rem; max-width: 60rem; margin: 0 auto; }
 .uploads .upload-name { grid-column: 1 / -1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .uploads progress { width: 100%; }
 .uploads .upload-failed .muted { color: var(--error); }
+.card.wide { max-width: none; width: auto; margin: 0 0 1rem; }
+.rows { list-style: none; margin: 0 0 .75rem; padding: 0; }
+.rows li { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .4rem 0; border-bottom: 1px solid var(--line); }
+.rows li > span { flex: 1 1 12rem; overflow-wrap: anywhere; }
+.rows select { max-width: 100%; }
+.admin progress { width: 100%; }
+.admin input[readonly] { width: 100%; }

@@ -66,6 +66,13 @@ const MESSAGES = {
   unauthenticated: "Please sign in.",
   unsupported_type: "Not a supported photo or video.",
   bad_file: "The file could not be read.",
+  forbidden: "Only an Admin can do that.",
+  cannot_remove_self: "You cannot remove yourself.",
+  member_not_found: "That Member no longer exists.",
+  confirmation_required: "Please confirm before deleting a Library.",
+  import_not_configured: "Server Import is not configured on this server.",
+  import_folder_not_found: "The import folder was not found.",
+  backup_failed: "The backup failed.",
   payload_too_large: "This file is too large to upload.",
 };
 

@@ -29,6 +29,7 @@ test("static assets are served with the right content types", async () => {
     "/auth.js": /^text\/javascript/,
     "/browse.js": /^text\/javascript/,
     "/upload.js": /^text\/javascript/,
+    "/admin.js": /^text\/javascript/,
     "/style.css": /^text\/css/,
   };
   for (const [path, type] of Object.entries(expected)) {
@@ -217,4 +218,46 @@ test("the upload flow works over the batch endpoint: per-file requests, resume w
   const bad = await send({ filename: "x.txt", uploadKey: "web:bad", contentBase64: Buffer.from("nope").toString("base64") });
   assert.equal(bad.status, "failed");
   assert.equal(bad.error, "unsupported_type");
+});
+
+test("the admin screens' endpoints work for an Admin and are rejected for a Member", async () => {
+  const json = { "content-type": "application/json" };
+  const login = async (email: string, password: string) =>
+    (await app.fetch("/api/login", { method: "POST", headers: json, body: JSON.stringify({ email, password }) }))
+      .headers.getSetCookie()[0].split(";", 1)[0];
+  const admin = await login("a@example.com", "correct horse battery");
+  const call = (cookie: string, method: string, path: string, body?: object) =>
+    app.fetch(path, { method, headers: { cookie, ...json }, body: body ? JSON.stringify(body) : undefined });
+
+  // Invite by email with role; the invitee joins.
+  const inv = await call(admin, "POST", "/api/invitations", { email: "kid@example.com", role: "member" });
+  assert.equal(inv.status, 201);
+  const { token } = (await inv.json()) as { token: string };
+  const accepted = await app.fetch("/api/invitations/accept", {
+    method: "POST", headers: json, body: JSON.stringify({ token, password: "another long password" }),
+  });
+  assert.equal(accepted.status, 201);
+  const kid = await login("kid@example.com", "another long password");
+
+  // Non-Admins are rejected on every admin endpoint.
+  for (const [method, path] of [
+    ["GET", "/api/members"], ["GET", "/api/admin/backups"], ["POST", "/api/admin/backups"],
+    ["GET", "/api/admin/disk"], ["POST", "/api/admin/import"], ["POST", "/api/invitations"],
+  ]) {
+    assert.equal((await call(kid, method, path, method === "GET" ? undefined : {})).status, 403, `${method} ${path}`);
+  }
+
+  // Admin sees members, backup status and disk usage.
+  const { members } = (await (await call(admin, "GET", "/api/members")).json()) as { members: { id: number; email: string }[] };
+  assert.deepEqual(members.map((m) => m.email), ["a@example.com", "kid@example.com"]);
+  const backups = (await (await call(admin, "GET", "/api/admin/backups")).json()) as any;
+  assert.equal(typeof backups.configured, "boolean");
+  const disk = (await (await call(admin, "GET", "/api/admin/disk")).json()) as any;
+  assert.ok(disk.totalBytes > 0 && disk.usedBytes >= 0 && disk.availableBytes >= 0);
+
+  // Removal with the transfer choice, as the UI sends it.
+  const kidId = members.find((m) => m.email === "kid@example.com")!.id;
+  const removed = await call(admin, "POST", `/api/members/${kidId}/remove`, { action: "transfer", confirm: false });
+  assert.equal(removed.status, 200);
+  assert.equal(((await removed.json()) as any).library, "transfer");
 });

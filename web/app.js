@@ -3,6 +3,7 @@ import { api, ApiError } from "./api.js";
 import { el } from "./dom.js";
 import { browse } from "./browse.js";
 import { uploader } from "./upload.js";
+import { adminScreen } from "./admin.js";
 import { inviteScreen, resetScreen, setupScreen, signInScreen } from "./auth.js";
 
 const root = document.getElementById("app");
@@ -53,12 +54,22 @@ function shell(libraries) {
     }
   });
 
+  const adminLink = document.createElement("button");
+  adminLink.textContent = "Admin";
+  adminLink.hidden = member.role !== "admin";
+  let adminOpen = false;
+  adminLink.addEventListener("click", () => {
+    adminOpen = !adminOpen;
+    adminLink.textContent = adminOpen ? "Library" : "Admin";
+    show();
+  });
+
   const brand = document.createElement("span");
   brand.className = "brand";
   brand.textContent = "Familio";
   const bar = document.createElement("header");
   bar.className = "topbar";
-  bar.append(brand, select, signOut);
+  bar.append(brand, select, adminLink, signOut);
 
   const main = document.createElement("main");
   const heading = document.createElement("h1");
@@ -67,6 +78,12 @@ function shell(libraries) {
   main.append(heading, uploadHost, content);
 
   const show = () => {
+    if (adminOpen && member.role === "admin") {
+      heading.textContent = "Admin";
+      uploadHost.replaceChildren();
+      content.replaceChildren(adminScreen({ me: member, libraries }));
+      return;
+    }
     heading.textContent = current ? libraryLabel(current) : "No Library";
     if (current) localStorage.setItem(LIBRARY_KEY, String(current.id));
     if (current) {
