@@ -130,7 +130,6 @@ function shell(libraries) {
   };
   select.addEventListener("change", () => {
     albumsOpen = false;
-    trashOpen = false;
     syncLinks();
     current = libraries.find((l) => l.id === Number(select.value));
     show();

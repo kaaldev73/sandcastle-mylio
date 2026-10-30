@@ -69,14 +69,20 @@ export function browse(host, library) {
   const crumbs = el("nav", { class: "crumbs", "aria-label": "Timeline" });
   const body = el("div", { class: "browse-body" });
   const overlay = el("div", { class: "viewer", hidden: "" });
+  // The page status sits under the full-screen viewer, so the viewer has its own.
+  const viewerStatus = el("p", { class: "msg", role: "status" });
 
   function fail(err) {
-    status.className = "msg error";
-    status.textContent = describeError(err);
+    for (const node of [status, viewerStatus]) {
+      node.className = "msg error";
+      node.textContent = describeError(err);
+    }
   }
   function clear() {
-    status.className = "msg";
-    status.textContent = "";
+    for (const node of [status, viewerStatus]) {
+      node.className = "msg";
+      node.textContent = "";
+    }
   }
 
   // ---- place filter ----
@@ -209,7 +215,8 @@ export function browse(host, library) {
     try {
       data = await api("GET", "/api/assets/" + id + "/neighbors" + queryString(params));
     } catch (err) {
-      return fail(err);
+      fail(err);
+      return false;
     }
     const a = data.asset;
     const img = el("img", { src: a.originalUrl, alt: a.filename });
@@ -226,8 +233,9 @@ export function browse(host, library) {
     );
     const del = el("button", { class: "danger", onclick: () => deleteAsset(a, data, span) }, "Delete");
     const bar = el("div", { class: "viewer-bar" }, prev, info, next, del, el("button", { onclick: close }, "Close"));
-    overlay.replaceChildren(bar, el("div", { class: "viewer-stage" }, img), ratingControls(a));
+    overlay.replaceChildren(bar, el("div", { class: "viewer-stage" }, img), ratingControls(a), viewerStatus);
     overlay.hidden = false;
+    return true;
   }
 
   /** Move the open Asset to Trash, then carry on with a neighbour. */
@@ -241,8 +249,14 @@ export function browse(host, library) {
     clear();
     listChanged = true;
     const neighbour = data.next || data.previous;
-    if (neighbour) await showAsset(neighbour.id, span);
-    else close();
+    if (!neighbour) return close();
+    if (!(await showAsset(neighbour.id, span))) {
+      // The Asset is gone, so don't leave it on screen with a live Delete button.
+      overlay.replaceChildren(
+        el("div", { class: "viewer-bar" }, el("button", { onclick: close }, "Close")),
+        viewerStatus,
+      );
+    }
   }
 
   /** Pick/Reject, stars and capture-date correction for the open Asset. */
