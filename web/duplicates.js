@@ -21,6 +21,7 @@ export function duplicatesScreen(host, library) {
     } catch (err) {
       return say(describeError(err), "error");
     }
+    say("");
     list.replaceChildren(
       ...(data.sets.length
         ? data.sets.map(card)
@@ -41,7 +42,7 @@ export function duplicatesScreen(host, library) {
         const keeper = choices.find((c) => c.radio.checked).asset;
         const others = set.assets.length - 1;
         if (!confirm(
-          "Keep " + keeper.filename + "? The other " + (others === 1 ? "copy goes" : others + " copies go") +
+          "Keep " + keeper.filename + "? The other " + (others === 1 ? "Duplicate goes" : others + " Duplicates go") +
           " to Trash, where you can restore " + (others === 1 ? "it" : "them") +
           ". Their Ratings and Albums are merged into the one you keep.",
         )) return;
@@ -51,10 +52,12 @@ export function duplicatesScreen(host, library) {
             confirm: true,
           });
         } catch (err) {
+          // The set may have changed since it was listed; reload so a stale one drops out.
+          await load();
           return say(describeError(err), "error");
         }
-        say("Kept " + keeper.filename + ". The other copies are in Trash.", "ok");
         await load();
+        say("Kept " + keeper.filename + ". The other Duplicates are in Trash.", "ok");
       },
     }, "Keep selected");
     return el("section", { class: "card dup-set" },
