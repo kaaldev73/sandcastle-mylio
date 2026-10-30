@@ -25,9 +25,31 @@ function queryString(params) {
   return text ? "?" + text : "";
 }
 
+/** Rating badge text for a grid tile: pick flag and stars. */
+function ratingBadge(asset) {
+  return (asset.flag === "pick" ? "⚑ " : "") + (asset.stars ? "★".repeat(asset.stars) : "");
+}
+
 function thumb(asset, onOpen) {
   const img = el("img", { src: asset.thumbnailUrl, alt: asset.filename, loading: "lazy" });
-  return el("button", { class: "tile", "aria-label": "Open " + asset.filename, onclick: onOpen }, img);
+  const tile = el("button", { class: "tile", "aria-label": "Open " + asset.filename, onclick: onOpen }, img);
+  paintTile(tile, asset);
+  return tile;
+}
+
+/** Show the Rating on a tile; Rejects are dimmed. */
+function paintTile(tile, asset) {
+  tile.classList.toggle("rejected", asset.flag === "reject");
+  tile.querySelector(".badge")?.remove();
+  const text = ratingBadge(asset);
+  if (text) tile.append(el("span", { class: "badge" }, text));
+}
+
+/** `datetime-local` value (local time) for an ISO instant. */
+function toLocalInput(iso) {
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 /** Mount the browser for one Library into `host`; returns nothing. */
@@ -38,6 +60,8 @@ export function browse(host, library) {
   let trail = [];
   let gridSpan = null;
   let viewing = false;
+  let dateChanged = false;
+  const tiles = new Map();
   let token = 0;
 
   const status = el("p", { class: "msg", role: "status" });
@@ -131,6 +155,7 @@ export function browse(host, library) {
   async function showGrid(span) {
     const mine = ++token;
     const grid = el("div", { class: "grid" });
+    tiles.clear();
     const more = el("button", { class: "primary", hidden: "" }, "Load more");
     const count = el("p", { class: "muted" });
     body.replaceChildren(count, grid, more);
@@ -150,7 +175,9 @@ export function browse(host, library) {
         if (mine !== token) return;
         clear();
         for (const a of data.assets) {
-          grid.append(thumb(a, () => open(a, span)));
+          const tile = thumb(a, () => open(a, span));
+          tiles.set(a.id, tile);
+          grid.append(tile);
         }
         count.textContent = data.total + (data.total === 1 ? " photo" : " photos");
         offset = data.nextOffset ?? offset;
@@ -197,17 +224,73 @@ export function browse(host, library) {
       a.filename + (data.position ? " · " + data.position + " of " + data.total : ""),
     );
     const bar = el("div", { class: "viewer-bar" }, prev, info, next, el("button", { onclick: close }, "Close"));
-    overlay.replaceChildren(bar, el("div", { class: "viewer-stage" }, img));
+    overlay.replaceChildren(bar, el("div", { class: "viewer-stage" }, img), ratingControls(a));
     overlay.hidden = false;
+  }
+
+  /** Pick/Reject, stars and capture-date correction for the open Asset. */
+  function ratingControls(a) {
+    const bar = el("div", { class: "rating-bar" });
+    const save = async (path, body) => {
+      try {
+        const updated = await api("PATCH", "/api/assets/" + a.id + path, body);
+        clear();
+        a = updated;
+        const tile = tiles.get(a.id);
+        if (tile) paintTile(tile, a);
+        draw();
+        return updated;
+      } catch (err) {
+        fail(err);
+      }
+    };
+    const flagButton = (label, flag) =>
+      el("button", {
+        class: a.flag === flag ? "on" : "",
+        "aria-pressed": String(a.flag === flag),
+        onclick: () => save("/flag", { flag: a.flag === flag ? "unflagged" : flag }),
+      }, label);
+    const star = (n) =>
+      el("button", {
+        class: "star" + (n <= a.stars ? " on" : ""),
+        "aria-label": n + (n === 1 ? " star" : " stars"),
+        "aria-pressed": String(n === a.stars),
+        onclick: () => save("/stars", { stars: n === a.stars ? 0 : n }),
+      }, "★");
+    function draw() {
+      const date = el("input", { type: "datetime-local", "aria-label": "Capture date", value: toLocalInput(a.captureDate) });
+      const setDate = el("button", {
+        onclick: async () => {
+          if (!date.value) return;
+          const before = a.captureDate;
+          const updated = await save("/date", { date: new Date(date.value).toISOString() });
+          if (updated && updated.captureDate !== before) dateChanged = true;
+        },
+      }, "Set date");
+      bar.replaceChildren(
+        flagButton("Pick", "pick"),
+        flagButton("Reject", "reject"),
+        el("span", { class: "stars" }, ...[1, 2, 3, 4, 5].map(star)),
+        date,
+        setDate,
+      );
+    }
+    draw();
+    return bar;
   }
 
   function close() {
     viewing = false;
+    if (dateChanged) {
+      // A corrected date moves the Asset in the Timeline and out of its period.
+      dateChanged = false;
+      refresh();
+    }
     overlay.hidden = true;
     overlay.replaceChildren();
   }
   const onKey = (e) => {
-    if (!viewing || !host.isConnected) return;
+    if (!viewing || !host.isConnected || e.target.tagName === "INPUT") return;
     const buttons = overlay.querySelectorAll(".viewer-bar button");
     if (e.key === "Escape") close();
     else if (e.key === "ArrowLeft" && !buttons[0].disabled) buttons[0].click();

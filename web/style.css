@@ -65,3 +65,12 @@ main { padding: 1rem; max-width: 60rem; margin: 0 auto; }
 .rows select { max-width: 100%; }
 .admin progress { width: 100%; }
 .admin input[readonly] { width: 100%; }
+
+.tile { position: relative; }
+.tile.rejected img { opacity: .35; filter: grayscale(1); }
+.tile .badge { position: absolute; left: 2px; bottom: 2px; padding: 0 .3rem; border-radius: 3px; background: rgba(0,0,0,.65); color: #fff; font-size: .75rem; }
+.rating-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: .5rem; padding: .5rem; }
+.rating-bar button.on { background: #fff; color: #000; }
+.rating-bar .stars { display: inline-flex; }
+.rating-bar .star { background: none; border: 0; color: #888; font-size: 1.5rem; padding: 0 .2rem; }
+.rating-bar .star.on { color: #f5c518; background: none; }

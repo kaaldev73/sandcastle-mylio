@@ -261,3 +261,56 @@ test("the admin screens' endpoints work for an Admin and are rejected for a Memb
   assert.equal(removed.status, 200);
   assert.equal(((await removed.json()) as any).library, "transfer");
 });
+
+test("the viewer's rating and date correction work over the API: flag, stars, clear, date moves the Asset in the Timeline", async () => {
+  const { makeJpegWithCaptureDate } = await import("./helpers/images.ts");
+  const login = await app.fetch("/api/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "a@example.com", password: "correct horse battery" }),
+  });
+  const cookie = login.headers.getSetCookie()[0].split(";", 1)[0];
+  const libs = (await (await app.fetch("/api/libraries", { headers: { cookie } })).json()) as {
+    libraries: { id: number; kind: string }[];
+  };
+  const id = libs.libraries.find((l) => l.kind === "private")!.id;
+  const send = async (method: string, path: string, body?: unknown) => {
+    const res = await app.fetch(path, {
+      method,
+      headers: { cookie, "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    assert.equal(res.status, 200, path);
+    return (await res.json()) as any;
+  };
+  const up = await app.fetch(`/api/libraries/${id}/assets`, {
+    method: "POST",
+    headers: { cookie, "x-filename": "rate-me.jpg" },
+    body: await makeJpegWithCaptureDate("1987:03:04 09:00:00"),
+  });
+  const asset = (await up.json()) as any;
+
+  let a = await send("PATCH", `/api/assets/${asset.id}/flag`, { flag: "reject" });
+  assert.equal(a.flag, "reject");
+  assert.equal(a.dimmed, true);
+  a = await send("PATCH", `/api/assets/${asset.id}/flag`, { flag: "pick" });
+  assert.equal(a.flag, "pick");
+  a = await send("PATCH", `/api/assets/${asset.id}/stars`, { stars: 4 });
+  assert.equal(a.stars, 4);
+  a = await send("PATCH", `/api/assets/${asset.id}/flag`, { flag: "unflagged" });
+  a = await send("PATCH", `/api/assets/${asset.id}/stars`, { stars: 0 });
+  assert.deepEqual([a.flag, a.stars], ["unflagged", 0]);
+
+  // The grid reports the Rating the tiles draw.
+  await send("PATCH", `/api/assets/${asset.id}/flag`, { flag: "reject" });
+  const grid = await send("GET", `/api/libraries/${id}/assets?from=1987-01-01&to=1987-12-31`);
+  assert.equal(grid.assets[0].flag, "reject");
+
+  // Date correction moves the Asset between Timeline years.
+  a = await send("PATCH", `/api/assets/${asset.id}/date`, { date: new Date("1991-07-01T12:00:00Z").toISOString() });
+  assert.equal(a.dateOverridden, true);
+  const years = await send("GET", `/api/libraries/${id}/timeline?level=year&parent=1990`);
+  assert.ok(years.periods.some((p: any) => p.label.includes("1991")));
+  const old = await send("GET", `/api/libraries/${id}/timeline?level=year&parent=1980`);
+  assert.ok(!old.periods.some((p: any) => p.label.includes("1987")));
+});
