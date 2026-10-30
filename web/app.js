@@ -2,6 +2,7 @@
 import { api, ApiError } from "./api.js";
 import { el } from "./dom.js";
 import { browse } from "./browse.js";
+import { uploader } from "./upload.js";
 import { inviteScreen, resetScreen, setupScreen, signInScreen } from "./auth.js";
 
 const root = document.getElementById("app");
@@ -62,13 +63,19 @@ function shell(libraries) {
   const main = document.createElement("main");
   const heading = document.createElement("h1");
   const content = document.createElement("div");
-  main.append(heading, content);
+  const uploadHost = document.createElement("div");
+  main.append(heading, uploadHost, content);
 
   const show = () => {
     heading.textContent = current ? libraryLabel(current) : "No Library";
     if (current) localStorage.setItem(LIBRARY_KEY, String(current.id));
-    if (current) browse(content, current);
-    else content.replaceChildren();
+    if (current) {
+      uploadHost.replaceChildren(uploader(current, () => browse(content, current)));
+      browse(content, current);
+    } else {
+      uploadHost.replaceChildren();
+      content.replaceChildren();
+    }
   };
   select.addEventListener("change", () => {
     current = libraries.find((l) => l.id === Number(select.value));

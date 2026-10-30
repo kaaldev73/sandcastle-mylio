@@ -9,7 +9,34 @@ export class ApiError extends Error {
   }
 }
 
-export async function api(method, path, body) {
+/** XHR variant used when the caller wants upload progress (fetch has none). */
+function apiWithProgress(method, path, body, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, path);
+    xhr.withCredentials = true;
+    xhr.setRequestHeader("content-type", "application/json");
+    xhr.upload.addEventListener("progress", (e) => {
+      if (e.lengthComputable) onProgress(e.loaded / e.total);
+    });
+    xhr.addEventListener("error", () => reject(new TypeError("network")));
+    xhr.addEventListener("abort", () => reject(new TypeError("network")));
+    xhr.addEventListener("load", () => {
+      let data = null;
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch {
+        // Non-JSON body: leave data null.
+      }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+      else reject(new ApiError(xhr.status, data?.error || "error", data?.message));
+    });
+    xhr.send(JSON.stringify(body));
+  });
+}
+
+export async function api(method, path, body, onProgress) {
+  if (onProgress) return apiWithProgress(method, path, body, onProgress);
   const init = { method, headers: {}, credentials: "same-origin" };
   if (body !== undefined) {
     init.headers["content-type"] = "application/json";
@@ -37,6 +64,9 @@ const MESSAGES = {
   already_member: "That email already has an account.",
   invalid_reset: "This reset link is not valid.",
   unauthenticated: "Please sign in.",
+  unsupported_type: "Not a supported photo or video.",
+  bad_file: "The file could not be read.",
+  payload_too_large: "This file is too large to upload.",
 };
 
 export function describeError(err) {

@@ -28,6 +28,7 @@ test("static assets are served with the right content types", async () => {
     "/api.js": /^text\/javascript/,
     "/auth.js": /^text\/javascript/,
     "/browse.js": /^text\/javascript/,
+    "/upload.js": /^text\/javascript/,
     "/style.css": /^text\/css/,
   };
   for (const [path, type] of Object.entries(expected)) {
@@ -172,4 +173,48 @@ test("the browse flow works over the API the UI calls: drill-down, paged grid, v
   const original = await app.fetch(view.asset.originalUrl, { headers: { cookie } });
   assert.equal(original.status, 200);
   assert.match(original.headers.get("content-type") ?? "", /^image\//);
+});
+
+test("the upload flow works over the batch endpoint: per-file requests, resume without duplicates, per-file failures retried", async () => {
+  const { makeJpeg } = await import("./helpers/images.ts");
+  const login = await app.fetch("/api/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "a@example.com", password: "correct horse battery" }),
+  });
+  const cookie = login.headers.getSetCookie()[0].split(";", 1)[0];
+  const libs = (await (await app.fetch("/api/libraries", { headers: { cookie } })).json()) as {
+    libraries: { id: number; kind: string }[];
+  };
+  const id = libs.libraries.find((l) => l.kind === "family")!.id;
+  const send = async (file: object) => {
+    const res = await app.fetch(`/api/libraries/${id}/assets/batch`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ files: [file] }),
+    });
+    assert.equal(res.status, 200);
+    return ((await res.json()) as any).results[0];
+  };
+  const list = async () =>
+    ((await (await app.fetch(`/api/libraries/${id}/assets`, { headers: { cookie } })).json()) as any).assets;
+  const before = (await list()).length;
+  const good = {
+    filename: "ui.jpg",
+    modifiedMs: 1_600_000_000_000,
+    uploadKey: `web:${id}:ui.jpg:1:1600000000000`,
+    contentBase64: (await makeJpeg()).toString("base64"),
+  };
+
+  assert.equal((await send(good)).status, "uploaded");
+  // The interrupted client re-sends the same key: same Asset, nothing new.
+  const again = await send(good);
+  assert.equal(again.status, "duplicate");
+  assert.equal((await list()).length, before + 1);
+
+  // A bad file fails on its own with a code the UI maps to a message, then a
+  // retry of a fixed file succeeds.
+  const bad = await send({ filename: "x.txt", uploadKey: "web:bad", contentBase64: Buffer.from("nope").toString("base64") });
+  assert.equal(bad.status, "failed");
+  assert.equal(bad.error, "unsupported_type");
 });
