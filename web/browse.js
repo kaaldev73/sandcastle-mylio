@@ -233,7 +233,13 @@ export function browse(host, library) {
     );
     const del = el("button", { class: "danger", onclick: () => deleteAsset(a, data, span) }, "Delete");
     const bar = el("div", { class: "viewer-bar" }, prev, info, next, del, el("button", { onclick: close }, "Close"));
-    overlay.replaceChildren(bar, el("div", { class: "viewer-stage" }, img), ratingControls(a), viewerStatus);
+    overlay.replaceChildren(
+      bar,
+      el("div", { class: "viewer-stage" }, img),
+      ratingControls(a),
+      ...(library.kind === "private" ? [shareControls(a, data, span)] : []),
+      viewerStatus,
+    );
     overlay.hidden = false;
     return true;
   }
@@ -247,16 +253,52 @@ export function browse(host, library) {
       return fail(err);
     }
     clear();
+    await leaveViewer(data, span);
+  }
+
+  /** The open Asset left this view (deleted or moved): carry on with a neighbour. */
+  async function leaveViewer(data, span) {
     listChanged = true;
     const neighbour = data.next || data.previous;
     if (!neighbour) return close();
     if (!(await showAsset(neighbour.id, span))) {
-      // The Asset is gone, so don't leave it on screen with a live Delete button.
+      // The Asset is gone, so don't leave it on screen with live controls.
       overlay.replaceChildren(
         el("div", { class: "viewer-bar" }, el("button", { onclick: close }, "Close")),
         viewerStatus,
       );
     }
+  }
+
+  /** Share the open Asset from the private Library to the Family Library. */
+  function shareControls(a, data, span) {
+    const panel = el("div", { class: "share-panel", hidden: "" });
+    const share = async (mode) => {
+      try {
+        await api("POST", "/api/assets/" + a.id + "/share", { mode });
+      } catch (err) {
+        // "forbidden" is worded for Admin-only actions elsewhere; sharing has its own reason.
+        if (err.code !== "forbidden") return fail(err);
+        viewerStatus.className = "msg error";
+        viewerStatus.textContent = "Only the photo's owner can share it.";
+        return;
+      }
+      clear();
+      if (mode === "move") await leaveViewer(data, span);
+      viewerStatus.className = "msg ok";
+      viewerStatus.textContent = mode === "move"
+        ? "Moved to the Family Library."
+        : "Copied to the Family Library.";
+      panel.hidden = true;
+    };
+    panel.append(
+      el("button", { onclick: () => share("move") }, "Move"),
+      el("span", { class: "muted" }, "Takes it out of your private Library."),
+      el("button", { onclick: () => share("copy") }, "Copy"),
+      el("span", { class: "muted" }, "Leaves the original in your private Library."),
+    );
+    const toggle = el("button", { onclick: () => { panel.hidden = !panel.hidden; } }, "Share to Family");
+    return el("div", { class: "share-bar" }, toggle, panel);
   }
 
   /** Pick/Reject, stars and capture-date correction for the open Asset. */

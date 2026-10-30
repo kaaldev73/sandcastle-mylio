@@ -505,3 +505,63 @@ test("the web UI offers the Duplicates view and resolve", () => {
     assert.match(src, call);
   }
 });
+
+test("the Share screens' endpoints work over the API: copy keeps the original, move rehomes it, Family Library shows both", async () => {
+  const login = await app.fetch("/api/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "a@example.com", password: "correct horse battery" }),
+  });
+  const cookie = login.headers.getSetCookie()[0].split(";", 1)[0];
+  const libs = (await (await app.fetch("/api/libraries", { headers: { cookie } })).json()) as {
+    libraries: { id: number; kind: string }[];
+  };
+  const family = libs.libraries.find((l) => l.kind === "family")!.id;
+  const priv = libs.libraries.find((l) => l.kind === "private")!.id;
+  const send = async (method: string, path: string, body?: unknown, status = 200) => {
+    const res = await app.fetch(path, {
+      method,
+      headers: { cookie, "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    assert.equal(res.status, status, `${method} ${path}`);
+    return (await res.json()) as any;
+  };
+  const upload = async (name: string, when: string) => {
+    const up = await app.fetch(`/api/libraries/${priv}/assets`, {
+      method: "POST",
+      headers: { cookie, "x-filename": name },
+      body: await (await import("./helpers/images.ts")).makeJpegWithCaptureDate(when),
+    });
+    return (await up.json()) as any;
+  };
+  const copied = await upload("share-copy.jpg", "2003:03:03 10:00:00");
+  const moved = await upload("share-move.jpg", "2003:03:04 10:00:00");
+  const ids = async (libraryId: number) =>
+    (await send("GET", `/api/libraries/${libraryId}/assets`)).assets.map((a: any) => a.id);
+
+  // Copy: the answer says what happened, the original stays in the private Library.
+  const c = await send("POST", `/api/assets/${copied.id}/share`, { mode: "copy" }, 201);
+  assert.equal(c.action, "copied");
+  assert.ok((await ids(priv)).includes(copied.id));
+  assert.ok((await ids(family)).includes(c.asset.id));
+
+  // Move: the same Asset leaves the private Library for the Family Library.
+  const m = await send("POST", `/api/assets/${moved.id}/share`, { mode: "move" });
+  assert.equal(m.action, "moved");
+  assert.ok(!(await ids(priv)).includes(moved.id));
+  assert.ok((await ids(family)).includes(moved.id));
+
+  // An Asset already in the Family Library is refused in plain terms.
+  const again = await send("POST", `/api/assets/${moved.id}/share`, { mode: "copy" }, 409);
+  assert.equal(again.error, "already_shared");
+});
+
+test("the web UI offers Share to Family with Move and Copy", () => {
+  const dir = new URL("../web/", import.meta.url);
+  const src = readdirSync(dir)
+    .filter((n) => n.endsWith(".js"))
+    .map((f) => readFileSync(new URL(f, dir), "utf8"))
+    .join("\n");
+  assert.match(src, /api\(\s*"POST"\s*,\s*"\/api\/assets\/"\s*\+\s*[\w.]+\s*\+\s*"\/share"\s*,\s*\{\s*mode/);
+});

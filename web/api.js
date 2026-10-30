@@ -73,6 +73,7 @@ const MESSAGES = {
   import_not_configured: "Server Import is not configured on this server.",
   import_folder_not_found: "The import folder was not found.",
   backup_failed: "The backup failed.",
+  already_shared: "This photo already belongs to the Family Library.",
   payload_too_large: "This file is too large to upload.",
 };
 
