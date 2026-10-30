@@ -87,3 +87,7 @@ main { padding: 1rem; max-width: 60rem; margin: 0 auto; }
 .trash-row { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
 .trash-row img { width: 3.5rem; height: 3.5rem; object-fit: cover; }
 .trash-row > span { flex: 1; min-width: 8rem; }
+.dup-list { display: flex; flex-direction: column; gap: 1rem; }
+.dup-assets { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: .75rem; }
+.dup-asset { display: flex; flex-direction: column; gap: .25rem; width: 9rem; }
+.dup-asset img { width: 100%; aspect-ratio: 1; object-fit: cover; }

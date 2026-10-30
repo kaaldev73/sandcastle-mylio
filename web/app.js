@@ -6,6 +6,7 @@ import { uploader } from "./upload.js";
 import { adminScreen } from "./admin.js";
 import { albumsScreen } from "./albums.js";
 import { trashScreen } from "./trash.js";
+import { duplicatesScreen } from "./duplicates.js";
 import { inviteScreen, resetScreen, setupScreen, signInScreen } from "./auth.js";
 
 const root = document.getElementById("app");
@@ -61,43 +62,33 @@ function shell(libraries) {
   adminLink.hidden = member.role !== "admin";
   const albumsLink = document.createElement("button");
   const trashLink = document.createElement("button");
-  let adminOpen = false;
-  let albumsOpen = false;
-  let trashOpen = false;
+  const duplicatesLink = document.createElement("button");
+  // Which screen is open: "library" (photos), "admin", "albums", "trash" or "duplicates".
+  let view = "library";
+  const toggles = [
+    [adminLink, "admin", "Admin", "Library"],
+    [albumsLink, "albums", "Albums", "Photos"],
+    [trashLink, "trash", "Trash", "Photos"],
+    [duplicatesLink, "duplicates", "Duplicates", "Photos"],
+  ];
   const syncLinks = () => {
-    adminLink.textContent = adminOpen ? "Library" : "Admin";
-    albumsLink.textContent = albumsOpen ? "Photos" : "Albums";
-    trashLink.textContent = trashOpen ? "Photos" : "Trash";
+    for (const [link, name, label, back] of toggles) link.textContent = view === name ? back : label;
   };
   syncLinks();
-  adminLink.addEventListener("click", () => {
-    adminOpen = !adminOpen;
-    albumsOpen = false;
-    trashOpen = false;
-    syncLinks();
-    show();
-  });
-  albumsLink.addEventListener("click", () => {
-    albumsOpen = !albumsOpen;
-    adminOpen = false;
-    trashOpen = false;
-    syncLinks();
-    show();
-  });
-  trashLink.addEventListener("click", () => {
-    trashOpen = !trashOpen;
-    adminOpen = false;
-    albumsOpen = false;
-    syncLinks();
-    show();
-  });
+  for (const [link, name] of toggles) {
+    link.addEventListener("click", () => {
+      view = view === name ? "library" : name;
+      syncLinks();
+      show();
+    });
+  }
 
   const brand = document.createElement("span");
   brand.className = "brand";
   brand.textContent = "Familio";
   const bar = document.createElement("header");
   bar.className = "topbar";
-  bar.append(brand, select, albumsLink, trashLink, adminLink, signOut);
+  bar.append(brand, select, albumsLink, trashLink, duplicatesLink, adminLink, signOut);
 
   const main = document.createElement("main");
   const heading = document.createElement("h1");
@@ -106,7 +97,7 @@ function shell(libraries) {
   main.append(heading, uploadHost, content);
 
   const show = () => {
-    if (adminOpen && member.role === "admin") {
+    if (view === "admin" && member.role === "admin") {
       heading.textContent = "Admin";
       uploadHost.replaceChildren();
       content.replaceChildren(adminScreen({ me: member, libraries }));
@@ -114,12 +105,10 @@ function shell(libraries) {
     }
     heading.textContent = current ? libraryLabel(current) : "No Library";
     if (current) localStorage.setItem(LIBRARY_KEY, String(current.id));
-    if (current && albumsOpen) {
+    const screen = { albums: albumsScreen, trash: trashScreen, duplicates: duplicatesScreen }[view];
+    if (current && screen) {
       uploadHost.replaceChildren();
-      albumsScreen(content, current);
-    } else if (current && trashOpen) {
-      uploadHost.replaceChildren();
-      trashScreen(content, current);
+      screen(content, current);
     } else if (current) {
       uploadHost.replaceChildren(uploader(current, () => browse(content, current)));
       browse(content, current);
@@ -129,7 +118,7 @@ function shell(libraries) {
     }
   };
   select.addEventListener("change", () => {
-    albumsOpen = false;
+    if (view === "albums") view = "library";
     syncLinks();
     current = libraries.find((l) => l.id === Number(select.value));
     show();

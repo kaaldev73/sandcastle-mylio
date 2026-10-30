@@ -429,3 +429,79 @@ test("the web UI offers delete, Trash, restore and permanent delete", () => {
     assert.match(src, call);
   }
 });
+
+test("the Duplicates screen's endpoints work over the API: list sets with a suggested keeper, resolve with a chosen keeper, others land in Trash", async () => {
+  const login = await app.fetch("/api/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "a@example.com", password: "correct horse battery" }),
+  });
+  const cookie = login.headers.getSetCookie()[0].split(";", 1)[0];
+  const libs = (await (await app.fetch("/api/libraries", { headers: { cookie } })).json()) as {
+    libraries: { id: number; kind: string }[];
+  };
+  const lib = libs.libraries.find((l) => l.kind === "family")!.id;
+  const priv = libs.libraries.find((l) => l.kind === "private")!.id;
+  const send = async (method: string, path: string, body?: unknown, status = 200) => {
+    const res = await app.fetch(path, {
+      method,
+      headers: { cookie, "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    assert.equal(res.status, status, `${method} ${path}`);
+    return (await res.json()) as any;
+  };
+  // Uploading the same bytes twice into one Library returns the existing Asset, so
+  // byte-identical copies are made the way a family makes them: by sharing.
+  const bytes = await (await import("./helpers/images.ts")).makeJpeg(77);
+  const upload = async (libraryId: number, name: string) => {
+    const up = await app.fetch(`/api/libraries/${libraryId}/assets`, {
+      method: "POST",
+      headers: { cookie, "x-filename": name },
+      body: bytes,
+    });
+    assert.ok(up.status === 200 || up.status === 201);
+    return (await up.json()) as any;
+  };
+  const one = await upload(lib, "dup-1.jpg");
+  const mine = await upload(priv, "dup-2.jpg");
+  const two = (await send("POST", `/api/assets/${mine.id}/share`, { mode: "move" })).asset;
+  assert.notEqual(one.id, two.id);
+  await send("PATCH", `/api/assets/${two.id}/stars`, { stars: 5 });
+  const album = await send("POST", `/api/libraries/${lib}/albums`, { name: "Dups" }, 201);
+  await send("POST", `/api/albums/${album.id}/assets`, { assetId: two.id });
+
+  // The set is listed side by side, with the suggested keeper and what the cards show.
+  const listed = await send("GET", `/api/libraries/${lib}/duplicates`);
+  const set = listed.sets.find((x: any) => x.assets.some((a: any) => a.id === one.id));
+  assert.deepEqual(set.assets.map((a: any) => a.id).sort(), [one.id, two.id].sort());
+  assert.equal(set.suggestedKeeperId, two.id);
+  assert.ok(set.assets.every((a: any) => a.thumbnailUrl && a.captureDate && "albumCount" in a));
+
+  // Resolving needs the explicit confirm; the Member's chosen keeper wins over the suggestion.
+  await send("POST", `/api/libraries/${lib}/duplicates/resolve`, { keeperId: one.id }, 400);
+  const done = await send("POST", `/api/libraries/${lib}/duplicates/resolve`, { keeperId: one.id, confirm: true });
+  assert.equal(done.kept.id, one.id);
+  assert.equal(done.kept.stars, 5, "Ratings merge into the kept copy");
+  assert.ok((await send("GET", `/api/albums/${album.id}`)).assets.some((a: any) => a.id === one.id));
+
+  // The set leaves the list and the other copy is recoverable in Trash.
+  const after = await send("GET", `/api/libraries/${lib}/duplicates`);
+  assert.ok(!after.sets.some((x: any) => x.assets.some((a: any) => a.id === one.id)));
+  const trash = await send("GET", `/api/libraries/${lib}/deleted`);
+  assert.ok(trash.assets.some((a: any) => a.id === two.id));
+});
+
+test("the web UI offers the Duplicates view and resolve", () => {
+  const dir = new URL("../web/", import.meta.url);
+  const src = readdirSync(dir)
+    .filter((n) => n.endsWith(".js"))
+    .map((f) => readFileSync(new URL(f, dir), "utf8"))
+    .join("\n");
+  for (const call of [
+    /api\(\s*"GET"\s*,\s*"\/api\/libraries\/"\s*\+\s*[\w.]+\s*\+\s*"\/duplicates"/,
+    /api\(\s*"POST"\s*,\s*"\/api\/libraries\/"\s*\+\s*[\w.]+\s*\+\s*"\/duplicates\/resolve"\s*,\s*\{[^}]*confirm: true/,
+  ]) {
+    assert.match(src, call);
+  }
+});
