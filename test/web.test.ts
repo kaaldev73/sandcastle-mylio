@@ -314,3 +314,44 @@ test("the viewer's rating and date correction work over the API: flag, stars, cl
   const old = await send("GET", `/api/libraries/${id}/timeline?level=year&parent=1980`);
   assert.ok(!old.periods.some((p: any) => p.label.includes("1987")));
 });
+
+test("the Albums screens' endpoints work over the API: create, rename, add, remove, delete, shared Albums in the Family Library", async () => {
+  const login = await app.fetch("/api/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "a@example.com", password: "correct horse battery" }),
+  });
+  const cookie = login.headers.getSetCookie()[0].split(";", 1)[0];
+  const libs = (await (await app.fetch("/api/libraries", { headers: { cookie } })).json()) as {
+    libraries: { id: number; kind: string }[];
+  };
+  const family = libs.libraries.find((l) => l.kind === "family")!.id;
+  const send = async (method: string, path: string, body?: unknown, status = 200) => {
+    const res = await app.fetch(path, {
+      method,
+      headers: { cookie, "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    assert.equal(res.status, status, path);
+    return status === 204 ? null : ((await res.json()) as any);
+  };
+  const up = await app.fetch(`/api/libraries/${family}/assets`, {
+    method: "POST",
+    headers: { cookie, "x-filename": "album-me.jpg" },
+    body: await (await import("./helpers/images.ts")).makeJpegWithCaptureDate("1999:05:06 10:00:00"),
+  });
+  const asset = (await up.json()) as any;
+
+  const album = await send("POST", `/api/libraries/${family}/albums`, { name: "Holiday" }, 201);
+  let a = await send("PATCH", `/api/albums/${album.id}`, { name: "Holiday 99" });
+  assert.equal(a.name, "Holiday 99");
+  a = await send("POST", `/api/albums/${album.id}/assets`, { assetId: asset.id });
+  assert.equal(a.assets.length, 1);
+  const list = await send("GET", `/api/libraries/${family}/albums`);
+  assert.equal(list.albums.find((x: any) => x.id === album.id).assetCount, 1);
+  a = await send("DELETE", `/api/albums/${album.id}/assets/${asset.id}`);
+  assert.equal(a.assets.length, 0);
+  await send("DELETE", `/api/albums/${album.id}`, undefined, 204);
+  const grid = await send("GET", `/api/libraries/${family}/assets`);
+  assert.ok(grid.assets.some((x: any) => x.id === asset.id));
+});

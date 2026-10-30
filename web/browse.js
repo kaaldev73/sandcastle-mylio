@@ -2,6 +2,7 @@
 // place filter. Everything is read through the existing JSON API.
 import { api, describeError } from "./api.js";
 import { el } from "./dom.js";
+import { addToAlbumControls } from "./albums.js";
 
 const LEVELS = ["decade", "year", "month", "day"];
 const PAGE_SIZE = 60;
@@ -273,6 +274,10 @@ export function browse(host, library) {
         el("span", { class: "stars" }, ...[1, 2, 3, 4, 5].map(star)),
         date,
         setDate,
+        addToAlbumControls(library, a.id, (text, isError) => {
+          status.className = isError ? "msg error" : "msg";
+          status.textContent = text;
+        }),
       );
     }
     draw();

@@ -4,6 +4,7 @@ import { el } from "./dom.js";
 import { browse } from "./browse.js";
 import { uploader } from "./upload.js";
 import { adminScreen } from "./admin.js";
+import { albumsScreen } from "./albums.js";
 import { inviteScreen, resetScreen, setupScreen, signInScreen } from "./auth.js";
 
 const root = document.getElementById("app");
@@ -60,7 +61,20 @@ function shell(libraries) {
   let adminOpen = false;
   adminLink.addEventListener("click", () => {
     adminOpen = !adminOpen;
+    albumsOpen = false;
+    albumsLink.textContent = "Albums";
     adminLink.textContent = adminOpen ? "Library" : "Admin";
+    show();
+  });
+
+  const albumsLink = document.createElement("button");
+  albumsLink.textContent = "Albums";
+  let albumsOpen = false;
+  albumsLink.addEventListener("click", () => {
+    adminOpen = false;
+    adminLink.textContent = "Admin";
+    albumsOpen = !albumsOpen;
+    albumsLink.textContent = albumsOpen ? "Photos" : "Albums";
     show();
   });
 
@@ -69,7 +83,7 @@ function shell(libraries) {
   brand.textContent = "Familio";
   const bar = document.createElement("header");
   bar.className = "topbar";
-  bar.append(brand, select, adminLink, signOut);
+  bar.append(brand, select, albumsLink, adminLink, signOut);
 
   const main = document.createElement("main");
   const heading = document.createElement("h1");
@@ -86,7 +100,10 @@ function shell(libraries) {
     }
     heading.textContent = current ? libraryLabel(current) : "No Library";
     if (current) localStorage.setItem(LIBRARY_KEY, String(current.id));
-    if (current) {
+    if (current && albumsOpen) {
+      uploadHost.replaceChildren();
+      albumsScreen(content, current);
+    } else if (current) {
       uploadHost.replaceChildren(uploader(current, () => browse(content, current)));
       browse(content, current);
     } else {
@@ -95,6 +112,8 @@ function shell(libraries) {
     }
   };
   select.addEventListener("change", () => {
+    albumsOpen = false;
+    albumsLink.textContent = "Albums";
     current = libraries.find((l) => l.id === Number(select.value));
     show();
   });
