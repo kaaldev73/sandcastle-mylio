@@ -34,6 +34,10 @@ _Avoid_: Feed, gallery, calendar
 A named, virtual grouping of Assets within a Library; one Asset can be in many Albums and nothing is copied.
 _Avoid_: Folder, collection
 
+**Trash**:
+The recoverable holding place for deleted Assets of a Library. An Asset in Trash is hidden everywhere else and can be restored; permanently deleting it from Trash is the only irreversible step.
+_Avoid_: Bin, archive, recycle bin
+
 **Rating**:
 A Member's judgement of an Asset: a Pick or Reject flag and/or 1-5 stars.
 _Avoid_: Score, favourite

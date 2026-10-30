@@ -61,7 +61,7 @@ export function browse(host, library) {
   let trail = [];
   let gridSpan = null;
   let viewing = false;
-  let dateChanged = false;
+  let listChanged = false;
   const tiles = new Map();
   let token = 0;
 
@@ -224,9 +224,25 @@ export function browse(host, library) {
       { class: "muted" },
       a.filename + (data.position ? " · " + data.position + " of " + data.total : ""),
     );
-    const bar = el("div", { class: "viewer-bar" }, prev, info, next, el("button", { onclick: close }, "Close"));
+    const del = el("button", { class: "danger", onclick: () => deleteAsset(a, data, span) }, "Delete");
+    const bar = el("div", { class: "viewer-bar" }, prev, info, next, del, el("button", { onclick: close }, "Close"));
     overlay.replaceChildren(bar, el("div", { class: "viewer-stage" }, img), ratingControls(a));
     overlay.hidden = false;
+  }
+
+  /** Move the open Asset to Trash, then carry on with a neighbour. */
+  async function deleteAsset(a, data, span) {
+    if (!confirm("Delete " + a.filename + "? It moves to Trash, where you can restore it.")) return;
+    try {
+      await api("DELETE", "/api/assets/" + a.id, { confirm: true });
+    } catch (err) {
+      return fail(err);
+    }
+    clear();
+    listChanged = true;
+    const neighbour = data.next || data.previous;
+    if (neighbour) await showAsset(neighbour.id, span);
+    else close();
   }
 
   /** Pick/Reject, stars and capture-date correction for the open Asset. */
@@ -265,7 +281,7 @@ export function browse(host, library) {
           if (!date.value) return;
           const before = a.captureDate;
           const updated = await save("/date", { date: new Date(date.value).toISOString() });
-          if (updated && updated.captureDate !== before) dateChanged = true;
+          if (updated && updated.captureDate !== before) listChanged = true;
         },
       }, "Set date");
       bar.replaceChildren(
@@ -286,9 +302,9 @@ export function browse(host, library) {
 
   function close() {
     viewing = false;
-    if (dateChanged) {
-      // A corrected date moves the Asset in the Timeline and out of its period.
-      dateChanged = false;
+    if (listChanged) {
+      // A corrected date or a deletion changes what the Timeline and grid show.
+      listChanged = false;
       refresh();
     }
     overlay.hidden = true;

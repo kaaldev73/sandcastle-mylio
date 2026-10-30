@@ -355,3 +355,77 @@ test("the Albums screens' endpoints work over the API: create, rename, add, remo
   const grid = await send("GET", `/api/libraries/${family}/assets`);
   assert.ok(grid.assets.some((x: any) => x.id === asset.id));
 });
+
+test("the Trash screens' endpoints work over the API: delete, list, restore with Rating and Album intact, permanent delete", async () => {
+  const login = await app.fetch("/api/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "a@example.com", password: "correct horse battery" }),
+  });
+  const cookie = login.headers.getSetCookie()[0].split(";", 1)[0];
+  const libs = (await (await app.fetch("/api/libraries", { headers: { cookie } })).json()) as {
+    libraries: { id: number; kind: string }[];
+  };
+  const family = libs.libraries.find((l) => l.kind === "family")!.id;
+  const send = async (method: string, path: string, body?: unknown, status = 200) => {
+    const res = await app.fetch(path, {
+      method,
+      headers: { cookie, "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    assert.equal(res.status, status, `${method} ${path}`);
+    return ((await res.json()) as any);
+  };
+  const upload = async (name: string, when: string) => {
+    const up = await app.fetch(`/api/libraries/${family}/assets`, {
+      method: "POST",
+      headers: { cookie, "x-filename": name },
+      body: await (await import("./helpers/images.ts")).makeJpegWithCaptureDate(when),
+    });
+    return (await up.json()) as any;
+  };
+  const first = await upload("trash-1.jpg", "2001:02:03 10:00:00");
+  const second = await upload("trash-2.jpg", "2001:02:04 10:00:00");
+  const album = await send("POST", `/api/libraries/${family}/albums`, { name: "Keep" }, 201);
+  await send("POST", `/api/albums/${album.id}/assets`, { assetId: first.id });
+  await send("PATCH", `/api/assets/${first.id}/stars`, { stars: 4 });
+
+  // The viewer's Delete sends the explicit confirmation as a JSON body.
+  await send("DELETE", `/api/assets/${first.id}`, { confirm: true });
+  await send("DELETE", `/api/assets/${second.id}`, { confirm: true });
+  const grid = await send("GET", `/api/libraries/${family}/assets`);
+  assert.ok(!grid.assets.some((x: any) => x.id === first.id || x.id === second.id));
+  assert.ok(!(await send("GET", `/api/albums/${album.id}`)).assets.some((x: any) => x.id === first.id));
+
+  // Trash lists newest deletion first, with what the entry shows.
+  const trash = await send("GET", `/api/libraries/${family}/deleted`);
+  assert.deepEqual(trash.assets.slice(0, 2).map((x: any) => x.id), [second.id, first.id]);
+  assert.ok(trash.assets[0].thumbnailUrl && trash.assets[0].captureDate);
+
+  // Restore brings back the Rating and Album membership.
+  const restored = await send("POST", `/api/assets/${first.id}/restore`, {});
+  assert.equal(restored.stars, 4);
+  assert.ok((await send("GET", `/api/albums/${album.id}`)).assets.some((x: any) => x.id === first.id));
+  assert.ok((await send("GET", `/api/libraries/${family}/assets`)).assets.some((x: any) => x.id === first.id));
+
+  // Permanent delete needs confirmation, then the Asset is gone for good.
+  await send("DELETE", `/api/assets/${second.id}/permanent`, {}, 400);
+  await send("DELETE", `/api/assets/${second.id}/permanent`, { confirm: true });
+  assert.ok(!(await send("GET", `/api/libraries/${family}/deleted`)).assets.some((x: any) => x.id === second.id));
+});
+
+test("the web UI offers delete, Trash, restore and permanent delete", () => {
+  const dir = new URL("../web/", import.meta.url);
+  const src = readdirSync(dir)
+    .filter((n) => n.endsWith(".js"))
+    .map((f) => readFileSync(new URL(f, dir), "utf8"))
+    .join("\n");
+  for (const call of [
+    /api\(\s*"DELETE"\s*,\s*"\/api\/assets\/"\s*\+\s*[\w.]+\s*,\s*\{\s*confirm: true/,
+    /api\(\s*"GET"\s*,\s*"\/api\/libraries\/"\s*\+\s*[\w.]+\s*\+\s*"\/deleted"/,
+    /api\(\s*"POST"\s*,\s*"\/api\/assets\/"\s*\+\s*[\w.]+\s*\+\s*"\/restore"/,
+    /api\(\s*"DELETE"\s*,\s*"\/api\/assets\/"\s*\+\s*[\w.]+\s*\+\s*"\/permanent"\s*,\s*\{\s*confirm: true/,
+  ]) {
+    assert.match(src, call);
+  }
+});

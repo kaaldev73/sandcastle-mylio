@@ -82,3 +82,8 @@ main { padding: 1rem; max-width: 60rem; margin: 0 auto; }
 .album-tile { position: relative; }
 .album-tile .remove { position: absolute; top: 2px; right: 2px; min-height: 0; padding: 0 .45rem; border-radius: 50%; background: rgba(0,0,0,.65); color: #fff; border: 0; }
 .album-add { display: inline-flex; gap: .25rem; }
+.danger { color: var(--error); }
+.trash-list { display: flex; flex-direction: column; gap: .5rem; }
+.trash-row { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.trash-row img { width: 3.5rem; height: 3.5rem; object-fit: cover; }
+.trash-row > span { flex: 1; min-width: 8rem; }

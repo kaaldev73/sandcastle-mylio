@@ -5,6 +5,7 @@ import { browse } from "./browse.js";
 import { uploader } from "./upload.js";
 import { adminScreen } from "./admin.js";
 import { albumsScreen } from "./albums.js";
+import { trashScreen } from "./trash.js";
 import { inviteScreen, resetScreen, setupScreen, signInScreen } from "./auth.js";
 
 const root = document.getElementById("app");
@@ -59,22 +60,34 @@ function shell(libraries) {
   adminLink.textContent = "Admin";
   adminLink.hidden = member.role !== "admin";
   const albumsLink = document.createElement("button");
+  const trashLink = document.createElement("button");
   let adminOpen = false;
   let albumsOpen = false;
+  let trashOpen = false;
   const syncLinks = () => {
     adminLink.textContent = adminOpen ? "Library" : "Admin";
     albumsLink.textContent = albumsOpen ? "Photos" : "Albums";
+    trashLink.textContent = trashOpen ? "Photos" : "Trash";
   };
   syncLinks();
   adminLink.addEventListener("click", () => {
     adminOpen = !adminOpen;
     albumsOpen = false;
+    trashOpen = false;
     syncLinks();
     show();
   });
   albumsLink.addEventListener("click", () => {
     albumsOpen = !albumsOpen;
     adminOpen = false;
+    trashOpen = false;
+    syncLinks();
+    show();
+  });
+  trashLink.addEventListener("click", () => {
+    trashOpen = !trashOpen;
+    adminOpen = false;
+    albumsOpen = false;
     syncLinks();
     show();
   });
@@ -84,7 +97,7 @@ function shell(libraries) {
   brand.textContent = "Familio";
   const bar = document.createElement("header");
   bar.className = "topbar";
-  bar.append(brand, select, albumsLink, adminLink, signOut);
+  bar.append(brand, select, albumsLink, trashLink, adminLink, signOut);
 
   const main = document.createElement("main");
   const heading = document.createElement("h1");
@@ -104,6 +117,9 @@ function shell(libraries) {
     if (current && albumsOpen) {
       uploadHost.replaceChildren();
       albumsScreen(content, current);
+    } else if (current && trashOpen) {
+      uploadHost.replaceChildren();
+      trashScreen(content, current);
     } else if (current) {
       uploadHost.replaceChildren(uploader(current, () => browse(content, current)));
       browse(content, current);
@@ -114,6 +130,7 @@ function shell(libraries) {
   };
   select.addEventListener("change", () => {
     albumsOpen = false;
+    trashOpen = false;
     syncLinks();
     current = libraries.find((l) => l.id === Number(select.value));
     show();
