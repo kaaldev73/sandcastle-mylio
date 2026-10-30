@@ -58,23 +58,24 @@ function shell(libraries) {
   const adminLink = document.createElement("button");
   adminLink.textContent = "Admin";
   adminLink.hidden = member.role !== "admin";
+  const albumsLink = document.createElement("button");
   let adminOpen = false;
+  let albumsOpen = false;
+  const syncLinks = () => {
+    adminLink.textContent = adminOpen ? "Library" : "Admin";
+    albumsLink.textContent = albumsOpen ? "Photos" : "Albums";
+  };
+  syncLinks();
   adminLink.addEventListener("click", () => {
     adminOpen = !adminOpen;
     albumsOpen = false;
-    albumsLink.textContent = "Albums";
-    adminLink.textContent = adminOpen ? "Library" : "Admin";
+    syncLinks();
     show();
   });
-
-  const albumsLink = document.createElement("button");
-  albumsLink.textContent = "Albums";
-  let albumsOpen = false;
   albumsLink.addEventListener("click", () => {
-    adminOpen = false;
-    adminLink.textContent = "Admin";
     albumsOpen = !albumsOpen;
-    albumsLink.textContent = albumsOpen ? "Photos" : "Albums";
+    adminOpen = false;
+    syncLinks();
     show();
   });
 
@@ -113,7 +114,7 @@ function shell(libraries) {
   };
   select.addEventListener("change", () => {
     albumsOpen = false;
-    albumsLink.textContent = "Albums";
+    syncLinks();
     current = libraries.find((l) => l.id === Number(select.value));
     show();
   });
