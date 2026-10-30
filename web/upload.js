@@ -76,7 +76,7 @@ export function uploader(library, onDone) {
       content = toBase64(await item.file.arrayBuffer());
     } catch {
       item.state = "failed";
-      item.error = "The file could not be read.";
+      item.error = describeError(new ApiError(0, "bad_file"));
       return;
     }
     const body = {
