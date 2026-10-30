@@ -78,6 +78,13 @@ export function browse(host, library) {
       node.textContent = describeError(err);
     }
   }
+  /** A success message, on the page and in the viewer. */
+  function say(text) {
+    for (const node of [status, viewerStatus]) {
+      node.className = "msg ok";
+      node.textContent = text;
+    }
+  }
   function clear() {
     for (const node of [status, viewerStatus]) {
       node.className = "msg";
@@ -237,7 +244,7 @@ export function browse(host, library) {
       bar,
       el("div", { class: "viewer-stage" }, img),
       ratingControls(a),
-      ...(library.kind === "private" ? [shareControls(a, data, span)] : []),
+      ...(library.mine ? [shareControls(a, data, span)] : []),
       viewerStatus,
     );
     overlay.hidden = false;
@@ -277,19 +284,17 @@ export function browse(host, library) {
       try {
         await api("POST", "/api/assets/" + a.id + "/share", { mode });
       } catch (err) {
-        // "forbidden" is worded for Admin-only actions elsewhere; sharing has its own reason.
-        if (err.code !== "forbidden") return fail(err);
-        viewerStatus.className = "msg error";
-        viewerStatus.textContent = "Only the photo's owner can share it.";
-        return;
+        return fail(err);
       }
       clear();
-      if (mode === "move") await leaveViewer(data, span);
-      viewerStatus.className = "msg ok";
-      viewerStatus.textContent = mode === "move"
-        ? "Moved to the Family Library."
-        : "Copied to the Family Library.";
       panel.hidden = true;
+      const done = a.filename + (mode === "move" ? " moved" : " copied") + " to the Family Library.";
+      if (mode === "copy") return say(done);
+      // A moved Asset leaves this view. The page status outlives the viewer, and
+      // a failed neighbour load keeps its own error rather than being overwritten.
+      await leaveViewer(data, span);
+      if (viewerStatus.className.includes("error")) return;
+      say(done);
     };
     panel.append(
       el("button", { onclick: () => share("move") }, "Move"),
@@ -356,15 +361,18 @@ export function browse(host, library) {
     return bar;
   }
 
+  /** Close the viewer; resolves once any refreshed list has loaded. */
   function close() {
     viewing = false;
+    let reloaded;
     if (listChanged) {
       // A corrected date or a deletion changes what the Timeline and grid show.
       listChanged = false;
-      refresh();
+      reloaded = refresh();
     }
     overlay.hidden = true;
     overlay.replaceChildren();
+    return reloaded;
   }
   const onKey = (e) => {
     if (!viewing || !host.isConnected || e.target.tagName === "INPUT") return;

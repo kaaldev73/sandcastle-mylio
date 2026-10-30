@@ -177,3 +177,35 @@ test("opening a Library that does not exist is a 404", async () => {
     await app.stop();
   }
 });
+
+test("each listed Library says whether it is the Member's own private Library", async () => {
+  const app = await startTestApp();
+  try {
+    const adminCookie = await setupAdmin(app);
+    const memberCookie = await joinMember(app, adminCookie, "mine@example.com");
+
+    const mine = (await listLibraries(app, memberCookie)) as (Library & { mine: boolean })[];
+    assert.deepEqual(
+      mine.map((l) => [l.kind, l.mine]).sort(),
+      [["family", false], ["private", true]],
+    );
+
+    // Once the Member is removed, their retained private Library is listed
+    // to the Admin but is not the Admin's own.
+    const members = (await (await app.fetch("/api/members", { headers: { cookie: adminCookie } })).json()) as {
+      members: { id: number; email: string }[];
+    };
+    const target = members.members.find((m) => m.email === "mine@example.com")!;
+    const removed = await app.fetch(`/api/members/${target.id}/remove`, {
+      method: "POST",
+      headers: { cookie: adminCookie },
+      body: JSON.stringify({ action: "keep" }),
+    });
+    assert.equal(removed.status, 200);
+    const adminView = (await listLibraries(app, adminCookie)) as (Library & { mine: boolean })[];
+    assert.equal(adminView.filter((l) => l.kind === "private").length, 2);
+    assert.equal(adminView.filter((l) => l.mine).length, 1);
+  } finally {
+    await app.stop();
+  }
+});

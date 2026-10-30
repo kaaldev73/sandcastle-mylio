@@ -88,7 +88,12 @@ export function createLibraries(db: DatabaseSync, auth: Auth) {
       const member = auth.currentMember(cookies);
       if (!member) throw new HttpError(401, "unauthenticated");
       sendJson(res, 200, {
-        libraries: accessible(member).map(publicLibrary),
+        // `mine` marks the Member's own private Library, so clients can tell it
+        // from a retained one an Admin manages (owner_id itself is never exposed).
+        libraries: accessible(member).map((l) => ({
+          ...publicLibrary(l),
+          mine: l.kind === "private" && l.owner_id === member.id,
+        })),
       });
     },
 
