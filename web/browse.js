@@ -234,7 +234,7 @@ export function browse(host, library) {
     overlay.replaceChildren(
       bar,
       el("div", { class: "viewer-stage" }, img),
-      ratingControls(a),
+      ratingControls(a, () => showAsset(a.id, span)),
       ...(library.mine ? [shareControls(a, data, span)] : []),
       viewerStatus,
     );
@@ -297,8 +297,12 @@ export function browse(host, library) {
     return el("div", { class: "share-bar" }, toggle, panel);
   }
 
-  /** Pick/Reject, stars and capture-date correction for the open Asset. */
-  function ratingControls(a) {
+  /**
+   * Pick/Reject, stars and capture-date correction for the open Asset.
+   * `reopen` reloads the viewer after a date change moved the Asset, so its
+   * position and neighbours are fresh.
+   */
+  function ratingControls(a, reopen) {
     const bar = el("div", { class: "rating-bar" });
     const save = async (path, body) => {
       try {
@@ -333,7 +337,10 @@ export function browse(host, library) {
           if (!date.value) return;
           const before = a.captureDate;
           const updated = await save("/date", { date: new Date(date.value).toISOString() });
-          if (updated && updated.captureDate !== before) listChanged = true;
+          if (updated && updated.captureDate !== before) {
+            listChanged = true;
+            await reopen();
+          }
         },
       }, "Set date");
       bar.replaceChildren(

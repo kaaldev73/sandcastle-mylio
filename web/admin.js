@@ -88,10 +88,11 @@ function invitePanel() {
     e.preventDefault();
     guarded(button, msg, async () => {
       const inv = await api("POST", "/api/invitations", Object.fromEntries(new FormData(form)));
+      // Reset first: the link field lives in the form, so reset() would blank it.
+      form.reset();
       link.value = `${location.origin}/invite?token=${encodeURIComponent(inv.token)}`;
       link.hidden = false;
       setStatus(msg, `Invitation created for ${inv.email}. Send them this link:`, "ok");
-      form.reset();
     });
   });
   return el("section", { class: "card wide" }, el("h2", {}, "Invite a Member"), form);
