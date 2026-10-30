@@ -52,3 +52,9 @@ main { padding: 1rem; max-width: 60rem; margin: 0 auto; }
 .viewer-bar .muted { flex: 1; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #bbb; }
 .viewer-stage { flex: 1; min-height: 0; display: grid; place-items: center; }
 .viewer-stage img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.upload { margin-bottom: 1rem; }
+.uploads { list-style: none; margin: 0; padding: 0; }
+.uploads li { display: grid; grid-template-columns: 1fr auto; gap: .2rem .75rem; padding: .4rem 0; border-bottom: 1px solid var(--line); align-items: center; }
+.uploads .upload-name { grid-column: 1 / -1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uploads progress { width: 100%; }
+.uploads .upload-failed .muted { color: var(--error); }
