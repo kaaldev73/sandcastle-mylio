@@ -1,7 +1,7 @@
 // Duplicates: sets of byte-identical Assets in one Library, side by side, with
 // the suggested keeper preselected. Resolving keeps one and sends the rest to Trash.
 import { api, describeError } from "./api.js";
-import { el } from "./dom.js";
+import { el, setStatus } from "./dom.js";
 
 /** Mount the Duplicates screen for one Library into `host`. */
 export function duplicatesScreen(host, library) {
@@ -9,10 +9,7 @@ export function duplicatesScreen(host, library) {
   const list = el("div", { class: "dup-list" });
   host.replaceChildren(status, list);
 
-  const say = (text, kind) => {
-    status.className = kind ? "msg " + kind : "msg";
-    status.textContent = text;
-  };
+  const say = (text, kind) => setStatus(status, text, kind);
 
   async function load() {
     let data;

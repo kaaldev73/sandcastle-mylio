@@ -1,6 +1,6 @@
 // Account screens: first-Admin setup, sign-in, invite acceptance, password reset.
 import { api, describeError } from "./api.js";
-import { el } from "./dom.js";
+import { el, setStatus } from "./dom.js";
 
 function field(label, name, type, attrs = {}) {
   return el("label", {}, label, el("input", { name, type, required: "", ...attrs }));
@@ -13,14 +13,12 @@ function formCard({ title, intro, fields, submit, onSubmit, links = [] }) {
   const form = el("form", {}, ...fields, button, msg);
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    msg.className = "msg";
-    msg.textContent = "";
+    setStatus(msg);
     button.disabled = true;
     try {
       await onSubmit(Object.fromEntries(new FormData(form)), msg);
     } catch (err) {
-      msg.className = "msg error";
-      msg.textContent = describeError(err);
+      setStatus(msg, describeError(err), "error");
     } finally {
       button.disabled = false;
     }
@@ -78,8 +76,7 @@ export function resetScreen({ go, token }) {
       submit: "Set password",
       onSubmit: async (v, msg) => {
         await api("POST", "/api/password-reset/confirm", { token, password: v.password });
-        msg.className = "msg ok";
-        msg.textContent = "Password changed. You can sign in now.";
+        setStatus(msg, "Password changed. You can sign in now.", "ok");
         setTimeout(() => go("/signin"), 1200);
       },
       links: [navLink("Back to sign in", "/signin", go)],
@@ -92,8 +89,7 @@ export function resetScreen({ go, token }) {
     submit: "Request reset",
     onSubmit: async (v, msg) => {
       const res = await api("POST", "/api/password-reset/request", { email: v.email });
-      msg.className = "msg ok";
-      msg.textContent = "If that email has an account, a reset link has been issued.";
+      setStatus(msg, "If that email has an account, a reset link has been issued.", "ok");
       // Until email delivery exists the server hands back the token; continue
       // straight to choosing a password with it.
       if (res.token) go(`/reset?token=${encodeURIComponent(res.token)}`);

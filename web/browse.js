@@ -1,7 +1,7 @@
 // Browsing a Library: Timeline drill-down, paged grid, Asset viewer and the
 // place filter. Everything is read through the existing JSON API.
 import { api, describeError } from "./api.js";
-import { el } from "./dom.js";
+import { el, setStatus } from "./dom.js";
 import { addToAlbumControls } from "./albums.js";
 
 const LEVELS = ["decade", "year", "month", "day"];
@@ -73,23 +73,14 @@ export function browse(host, library) {
   const viewerStatus = el("p", { class: "msg", role: "status" });
 
   function fail(err) {
-    for (const node of [status, viewerStatus]) {
-      node.className = "msg error";
-      node.textContent = describeError(err);
-    }
+    for (const node of [status, viewerStatus]) setStatus(node, describeError(err), "error");
   }
   /** A success message, on the page and in the viewer. */
   function say(text) {
-    for (const node of [status, viewerStatus]) {
-      node.className = "msg ok";
-      node.textContent = text;
-    }
+    for (const node of [status, viewerStatus]) setStatus(node, text, "ok");
   }
   function clear() {
-    for (const node of [status, viewerStatus]) {
-      node.className = "msg";
-      node.textContent = "";
-    }
+    for (const node of [status, viewerStatus]) setStatus(node);
   }
 
   // ---- place filter ----
@@ -352,8 +343,7 @@ export function browse(host, library) {
         date,
         setDate,
         addToAlbumControls(library, a.id, (text, isError) => {
-          status.className = isError ? "msg error" : "msg";
-          status.textContent = text;
+          setStatus(status, text, isError ? "error" : "");
         }),
       );
     }

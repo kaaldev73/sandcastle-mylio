@@ -57,38 +57,40 @@ function shell(libraries) {
     }
   });
 
-  const adminLink = document.createElement("button");
-  adminLink.textContent = "Admin";
-  adminLink.hidden = member.role !== "admin";
-  const albumsLink = document.createElement("button");
-  const trashLink = document.createElement("button");
-  const duplicatesLink = document.createElement("button");
-  // Which screen is open: "library" (photos), "admin", "albums", "trash" or "duplicates".
+  // Which screen is open: "library" (photos) or the `name` of a toggle. Adding a
+  // screen means adding one entry here, in bar order. `open(content, current)`
+  // mounts it; `needsLibrary` screens wait for a Library; `resetOnSwitch`
+  // screens close when the Library switcher changes.
   let view = "library";
   const toggles = [
-    [adminLink, "admin", "Admin", "Library"],
-    [albumsLink, "albums", "Albums", "Photos"],
-    [trashLink, "trash", "Trash", "Photos"],
-    [duplicatesLink, "duplicates", "Duplicates", "Photos"],
+    { name: "albums", label: "Albums", back: "Photos", needsLibrary: true, resetOnSwitch: true, open: albumsScreen },
+    { name: "trash", label: "Trash", back: "Photos", needsLibrary: true, open: trashScreen },
+    { name: "duplicates", label: "Duplicates", back: "Photos", needsLibrary: true, open: duplicatesScreen },
+    {
+      name: "admin", label: "Admin", back: "Library", adminOnly: true, title: "Admin",
+      open: (content) => content.replaceChildren(adminScreen({ me: member, libraries })),
+    },
   ];
-  const syncLinks = () => {
-    for (const [link, name, label, back] of toggles) link.textContent = view === name ? back : label;
-  };
-  syncLinks();
-  for (const [link, name] of toggles) {
-    link.addEventListener("click", () => {
-      view = view === name ? "library" : name;
+  for (const t of toggles) {
+    t.link = document.createElement("button");
+    t.link.hidden = t.adminOnly && member.role !== "admin";
+    t.link.addEventListener("click", () => {
+      view = view === t.name ? "library" : t.name;
       syncLinks();
       show();
     });
   }
+  const syncLinks = () => {
+    for (const t of toggles) t.link.textContent = view === t.name ? t.back : t.label;
+  };
+  syncLinks();
 
   const brand = document.createElement("span");
   brand.className = "brand";
   brand.textContent = "Familio";
   const bar = document.createElement("header");
   bar.className = "topbar";
-  bar.append(brand, select, albumsLink, trashLink, duplicatesLink, adminLink, signOut);
+  bar.append(brand, select, ...toggles.map((t) => t.link), signOut);
 
   const main = document.createElement("main");
   const heading = document.createElement("h1");
@@ -97,18 +99,18 @@ function shell(libraries) {
   main.append(heading, uploadHost, content);
 
   const show = () => {
-    if (view === "admin" && member.role === "admin") {
-      heading.textContent = "Admin";
+    const open = toggles.find((t) => t.name === view && (!t.adminOnly || member.role === "admin"));
+    if (open && !open.needsLibrary) {
+      heading.textContent = open.title;
       uploadHost.replaceChildren();
-      content.replaceChildren(adminScreen({ me: member, libraries }));
+      open.open(content);
       return;
     }
     heading.textContent = current ? libraryLabel(current) : "No Library";
     if (current) localStorage.setItem(LIBRARY_KEY, String(current.id));
-    const screen = { albums: albumsScreen, trash: trashScreen, duplicates: duplicatesScreen }[view];
-    if (current && screen) {
+    if (current && open) {
       uploadHost.replaceChildren();
-      screen(content, current);
+      open.open(content, current);
     } else if (current) {
       uploadHost.replaceChildren(uploader(current, () => browse(content, current)));
       browse(content, current);
@@ -118,7 +120,7 @@ function shell(libraries) {
     }
   };
   select.addEventListener("change", () => {
-    if (view === "albums") view = "library";
+    if (toggles.find((t) => t.name === view)?.resetOnSwitch) view = "library";
     syncLinks();
     current = libraries.find((l) => l.id === Number(select.value));
     show();

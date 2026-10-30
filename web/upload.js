@@ -3,7 +3,7 @@
 // upload key, so re-sending after an interruption (or a page reload) returns
 // the Asset already saved instead of a second one.
 import { api, ApiError, describeError } from "./api.js";
-import { el } from "./dom.js";
+import { el, setStatus } from "./dom.js";
 
 const MAX_ATTEMPTS = 3;
 
@@ -60,8 +60,7 @@ export function uploader(library, onDone) {
     const count = (s) => items.filter((i) => i.state === s).length;
     const finished = count("done") + count("duplicate");
     const failed = count("failed");
-    summary.className = "msg" + (failed ? " error" : "");
-    summary.textContent = `${finished} of ${items.length} uploaded` + (failed ? `, ${failed} failed` : "");
+    setStatus(summary, `${finished} of ${items.length} uploaded` + (failed ? `, ${failed} failed` : ""), failed ? "error" : "");
     retryAll.hidden = failed === 0 || running;
   }
 

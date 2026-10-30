@@ -1,7 +1,7 @@
 // Trash: deleted Assets of one Library, newest deletion first, with Restore
 // and permanent delete. Deleting itself happens in the Asset viewer (browse.js).
 import { api, describeError } from "./api.js";
-import { el } from "./dom.js";
+import { el, setStatus } from "./dom.js";
 
 /** Mount the Trash screen for one Library into `host`. */
 export function trashScreen(host, library) {
@@ -9,10 +9,7 @@ export function trashScreen(host, library) {
   const list = el("div", { class: "trash-list" });
   host.replaceChildren(status, list);
 
-  const fail = (err) => {
-    status.className = "msg error";
-    status.textContent = describeError(err);
-  };
+  const fail = (err) => setStatus(status, describeError(err), "error");
 
   async function load() {
     let data;
@@ -21,8 +18,7 @@ export function trashScreen(host, library) {
     } catch (err) {
       return fail(err);
     }
-    status.className = "msg";
-    status.textContent = "";
+    setStatus(status);
     list.replaceChildren(
       ...(data.assets.length
         ? data.assets.map(row)

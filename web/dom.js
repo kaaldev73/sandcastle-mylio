@@ -10,3 +10,9 @@ export function el(tag, props = {}, ...children) {
   node.append(...children);
   return node;
 }
+
+/** Write a status line: `kind` is "error", "ok" or empty (plain). */
+export function setStatus(node, text = "", kind = "") {
+  node.className = kind ? `msg ${kind}` : "msg";
+  node.textContent = text;
+}

@@ -1,7 +1,7 @@
 // Albums: list, create, rename, delete, and a paged Album view where Assets
 // can be removed. Adding Assets happens from the Asset viewer (browse.js).
 import { api, describeError } from "./api.js";
-import { el } from "./dom.js";
+import { el, setStatus } from "./dom.js";
 
 const PAGE_SIZE = 60;
 
@@ -11,14 +11,8 @@ export function albumsScreen(host, library) {
   const body = el("div", { class: "albums-body" });
   host.replaceChildren(status, body);
 
-  const fail = (err) => {
-    status.className = "msg error";
-    status.textContent = describeError(err);
-  };
-  const clear = () => {
-    status.className = "msg";
-    status.textContent = "";
-  };
+  const fail = (err) => setStatus(status, describeError(err), "error");
+  const clear = () => setStatus(status);
 
   async function showList() {
     let data;

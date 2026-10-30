@@ -1,6 +1,6 @@
 // Admin screens: Members, invitations, backups, disk usage, Server Import.
 import { api, describeError } from "./api.js";
-import { el } from "./dom.js";
+import { el, setStatus } from "./dom.js";
 
 const MB = 1024 * 1024;
 function formatBytes(n) {
@@ -11,19 +11,15 @@ function formatBytes(n) {
 function message() {
   return el("p", { class: "msg", role: "alert" });
 }
-function say(msg, text, kind) {
-  msg.className = kind ? `msg ${kind}` : "msg";
-  msg.textContent = text;
-}
 
 /** Run an async action behind a button, reporting the outcome in `msg`. */
 async function guarded(button, msg, action) {
   button.disabled = true;
-  say(msg, "");
+  setStatus(msg, "");
   try {
     await action();
   } catch (err) {
-    say(msg, describeError(err), "error");
+    setStatus(msg, describeError(err), "error");
   } finally {
     button.disabled = false;
   }
@@ -58,7 +54,7 @@ function membersPanel(me) {
           : `Remove ${m.email}?`;
         if (!confirm(warning)) return;
         await api("POST", `/api/members/${m.id}/remove`, { action, confirm: action === "delete" });
-        say(msg, `${m.email} was removed.`, "ok");
+        setStatus(msg, `${m.email} was removed.`, "ok");
         await load();
       }),
     );
@@ -66,7 +62,7 @@ function membersPanel(me) {
     return li;
   }
 
-  load().catch((err) => say(msg, describeError(err), "error"));
+  load().catch((err) => setStatus(msg, describeError(err), "error"));
   return panel;
 }
 
@@ -94,7 +90,7 @@ function invitePanel() {
       const inv = await api("POST", "/api/invitations", Object.fromEntries(new FormData(form)));
       link.value = `${location.origin}/invite?token=${encodeURIComponent(inv.token)}`;
       link.hidden = false;
-      say(msg, `Invitation created for ${inv.email}. Send them this link:`, "ok");
+      setStatus(msg, `Invitation created for ${inv.email}. Send them this link:`, "ok");
       form.reset();
     });
   });
@@ -124,11 +120,11 @@ function backupPanel() {
   run.addEventListener("click", () =>
     guarded(run, msg, async () => {
       await api("POST", "/api/admin/backups", {});
-      say(msg, "Backup finished.", "ok");
+      setStatus(msg, "Backup finished.", "ok");
       await load();
     }),
   );
-  load().catch((err) => say(msg, describeError(err), "error"));
+  load().catch((err) => setStatus(msg, describeError(err), "error"));
   return panel;
 }
 
@@ -141,7 +137,7 @@ function diskPanel() {
       bar.value = d.totalBytes ? d.usedBytes / d.totalBytes : 0;
       text.textContent = `${formatBytes(d.usedBytes)} used of ${formatBytes(d.totalBytes)}; ${formatBytes(d.availableBytes)} available.`;
     })
-    .catch((err) => say(msg, describeError(err), "error"));
+    .catch((err) => setStatus(msg, describeError(err), "error"));
   return el("section", { class: "card wide" }, el("h2", {}, "Disk usage"), bar, text, msg);
 }
 
@@ -156,9 +152,9 @@ function importPanel(libraries) {
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     guarded(button, msg, async () => {
-      say(msg, "Importing…");
+      setStatus(msg, "Importing…");
       const r = await api("POST", "/api/admin/import", { libraryId: Number(target.value) });
-      say(msg, `Imported ${r.importedCount}, skipped ${r.skippedCount}, unsupported ${r.unsupportedCount}, failed ${r.failedCount}.`, "ok");
+      setStatus(msg, `Imported ${r.importedCount}, skipped ${r.skippedCount}, unsupported ${r.unsupportedCount}, failed ${r.failedCount}.`, "ok");
     });
   });
   return el("section", { class: "card wide" }, el("h2", {}, "Server Import"), form);
